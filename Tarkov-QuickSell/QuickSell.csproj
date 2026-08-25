@@ -1,0 +1,130 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <RootNamespace>QuickSell</RootNamespace>
+    <AssemblyName>QuickSell</AssemblyName>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyVersion>3.1.0</AssemblyVersion>
+    <FileVersion>$(AssemblyVersion)</FileVersion>
+    <Version>$(AssemblyVersion)</Version>
+    <Deterministic>true</Deterministic>
+    <!-- Assembly metadata is generated from the properties above so that there is a single
+         source of truth for the version. The old Properties/AssemblyInfo.cs still declared
+         1.0.0.0, which contradicted the 3.1.0 in the BepInPlugin attribute - the Forge
+         requires every version declared in a mod to match exactly. -->
+    <Title>BlackHawk-QuickSell</Title>
+    <Product>BlackHawk-QuickSell</Product>
+    <Description>Adds context menu entries and keybinds to quickly sell stash items to traders or the flea market.</Description>
+    <Copyright>Copyright (c) TadMaj, MIT licensed. 4.1.3 port by BLACK HAWK.</Copyright>
+  </PropertyGroup>
+
+  <!--
+    Path to the root of your SPT 4.1.3 install (the folder containing BepInEx\ and
+    EscapeFromTarkov_Data\). Note that 4.1 renamed the server folder from SPT\ to
+    SPT_Runtime\ - that does not affect client plugins, which still live in BepInEx\plugins.
+    Resolution order:
+      1) -p:SptPath="C:\Path\To\SPT" on the build command line
+      2) the SPT_PATH environment variable
+      3) two folders up, i.e. this project sitting in [SPT root]\Development\Tarkov-QuickSell\
+  -->
+  <PropertyGroup>
+    <SptPath Condition="'$(SptPath)' == '' AND '$(SPT_PATH)' != ''">$(SPT_PATH)</SptPath>
+    <SptPath Condition="'$(SptPath)' == ''">$(MSBuildProjectDirectory)\..\..</SptPath>
+    <ManagedPath>$(SptPath)\EscapeFromTarkov_Data\Managed</ManagedPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(SptPath)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(SptPath)\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="spt-common">
+      <HintPath>$(SptPath)\BepInEx\plugins\spt\spt-common.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="spt-reflection">
+      <HintPath>$(SptPath)\BepInEx\plugins\spt\spt-reflection.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedPath)\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Comfort">
+      <HintPath>$(ManagedPath)\Comfort.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Comfort.Unity">
+      <HintPath>$(ManagedPath)\Comfort.Unity.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="CommonExtensions">
+      <HintPath>$(ManagedPath)\CommonExtensions.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(ManagedPath)\Newtonsoft.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- SerializedMonoBehaviour, the base class of many EFT UI types, lives here.
+         Without it the compiler cannot see inherited MonoBehaviour members. -->
+    <Reference Include="Sirenix.Serialization">
+      <HintPath>$(ManagedPath)\Sirenix.Serialization.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Sirenix.OdinInspector.Attributes">
+      <HintPath>$(ManagedPath)\Sirenix.OdinInspector.Attributes.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(ManagedPath)\Unity.TextMeshPro.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedPath)\UnityEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedPath)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(ManagedPath)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(ManagedPath)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(ManagedPath)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(ManagedPath)\UnityEngine.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(ManagedPath)\UnityEngine.UIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    Copy the built plugin into BepInEx\plugins\QuickSell\. The folder is created first:
+    the original project used a bare `copy` that silently failed if the folder was missing.
+  -->
+  <Target Name="CopyToPlugins" AfterTargets="PostBuildEvent">
+    <MakeDir Directories="$(SptPath)\BepInEx\plugins\QuickSell" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SptPath)\BepInEx\plugins\QuickSell\" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

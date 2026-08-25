@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>BlackHawk.QuickSell.Server</AssemblyName>
+    <RootNamespace>BlackHawk.QuickSell.Server</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <!-- Must match the client plugin version exactly. -->
+    <Version>3.1.0</Version>
+  </PropertyGroup>
+
+  <!--
+    As of SPT 4.1.3 the packages are published as SPTushonka.* rather than SPTarkov.*.
+    Only the package names changed - the assemblies and namespaces are still SPTarkov.*,
+    so no using directive needs touching.
+
+    Using NuGet rather than referencing DLLs out of the install means the build does not
+    depend on where SPT is on disk. Note the server verifies which version of the core
+    library a mod was built against and refuses to load a mismatch, so this must track
+    the SPT version being targeted.
+  -->
+  <ItemGroup>
+    <PackageReference Include="SPTushonka.Server.Core" Version="4.1.*" />
+    <PackageReference Include="SPTushonka.Common" Version="4.1.*" />
+    <PackageReference Include="SPTushonka.DI" Version="4.1.*" />
+  </ItemGroup>
+
+  <!--
+    Where to deploy the built mod. Unlike the client project, the packages come from NuGet, so
+    SptPath is needed ONLY for this copy step - the build itself compiles fine without it.
+    Resolution order:
+      1) -p:SptPath="C:\Path\To\SPT" on the command line
+      2) the SPT_PATH environment variable
+      3) two folders up, i.e. this project sitting in [SPT root]\Development\QuickSell-Server\
+  -->
+  <PropertyGroup>
+    <SptPath Condition="'$(SptPath)' == '' AND '$(SPT_PATH)' != ''">$(SPT_PATH)</SptPath>
+    <SptPath Condition="'$(SptPath)' == ''">$(MSBuildProjectDirectory)\..\..</SptPath>
+
+    <!--
+      Server mods live in SPT_Runtime\user\mods in SPT 4.1 (it was SPT\user\mods in 4.0 - the
+      folder was renamed). Each mod gets its own subfolder.
+    -->
+    <ServerModsPath>$(SptPath)\SPT_Runtime\user\mods\QuickSell</ServerModsPath>
+  </PropertyGroup>
+
+  <!--
+    Copy into the mods folder after a successful build, the same way the client project drops its
+    DLL into BepInEx\plugins.
+
+    This is skipped rather than failed when the target does not exist, because the build genuinely
+    does not need SPT present - somebody building from a clean checkout without an install should
+    still get a DLL rather than an error.
+  -->
+  <Target Name="CopyToServerMods" AfterTargets="PostBuildEvent">
+    <MakeDir Directories="$(ServerModsPath)"
+             Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(ServerModsPath)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+
+    <Message Importance="high"
+             Text="QuickSell server mod copied to $(ServerModsPath)"
+             Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+
+    <Message Importance="high"
+             Text="NOTE: $(SptPath)\SPT_Runtime\user\mods not found, so the server mod was NOT deployed. Pass -p:SptPath=&quot;C:\Path\To\SPT&quot; to deploy it automatically."
+             Condition="!Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+  </Target>
+
+</Project>

@@ -1,0 +1,40 @@
+{
+  "EnableQuickSellFlea": true,
+  "EnableQuickSellTraders": true,
+  "ShowConfirmationDialog": true,
+  "TradersBlacklist": [],
+  "AvgPricePercent": 100,
+  "IgnoreFleaCapacity": false,
+  "DisableKeybinds": false,
+  "ShowPriceTooltips": true,
+  "ShowTraderPriceInTooltip": true,
+  "ShowFleaPriceInTooltip": true,
+  "ShowPricesInRaid": true,
+  "OverrideTooltipDelay": true,
+  "TooltipDelay": 0.2,
+  "EnableColorCoding": true,
+  "UseAmmoPenetrationTiers": true,
+  "BestTradeColor": "FFFFFF",
+  "PriceTierThresholds": [
+    900,
+    12000,
+    21000,
+    38000,
+    92000
+  ],
+  "AmmoTierThresholds": [
+    15,
+    25,
+    34,
+    43,
+    55
+  ],
+  "TierColors": [
+    "9D9D9D",
+    "FFFFFF",
+    "1EFF00",
+    "0070DD",
+    "A335EE",
+    "FF8000"
+  ]
+}
