@@ -90,17 +90,4 @@ Prices are never fetched during a raid.
 
 Nothing is hardcoded. The trader list comes from the server, and any trader that does not buy an item is skipped. Traders released in future work with no changes. The list is re-queried when empty, which also fixes traders unlocked mid-session (quest-gated modded traders, Lightkeeper) not appearing until restart.
 
-## Building
-
-**Client:** put in `[SPT root]\Development\Tarkov-QuickSell\`, then `dotnet build -c Release`
-**Server:** `dotnet build -c Release` in `QuickSell-Server`
-
-Both accept `-p:SptPath="C:\Path\To\SPT"` if they live elsewhere. `SptPath` is the folder containing `BepInEx\` and `EscapeFromTarkov_Data\` — not `SPT_Runtime\`.
-
-Client and server versions must stay identical (`3.1.0`).
-
-## AI assistance disclosure
-
-This port and its added features were produced with substantial AI assistance. Type renames were taken from SPT's official [class name mappings](https://wiki.sp-tushonka.com/) and member renames were read directly from the installed `Assembly-CSharp.dll` rather than guessed, but the code was largely AI-generated.
-
 The Forge requires the **"Contains AI Content"** flag to be enabled for any mod produced with LLM assistance.
