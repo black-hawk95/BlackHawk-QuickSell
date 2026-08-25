@@ -90,4 +90,3 @@ Prices are never fetched during a raid.
 
 Nothing is hardcoded. The trader list comes from the server, and any trader that does not buy an item is skipped. Traders released in future work with no changes. The list is re-queried when empty, which also fixes traders unlocked mid-session (quest-gated modded traders, Lightkeeper) not appearing until restart.
 
-The Forge requires the **"Contains AI Content"** flag to be enabled for any mod produced with LLM assistance.
