@@ -1,40 +1,14 @@
 {
-  "EnableQuickSellFlea": true,
-  "EnableQuickSellTraders": true,
-  "ShowConfirmationDialog": true,
-  "TradersBlacklist": [],
-  "AvgPricePercent": 100,
-  "IgnoreFleaCapacity": false,
-  "DisableKeybinds": false,
-  "ShowPriceTooltips": true,
-  "ShowTraderPriceInTooltip": true,
-  "ShowFleaPriceInTooltip": true,
-  "ShowPricesInRaid": true,
-  "OverrideTooltipDelay": true,
-  "TooltipDelay": 0.2,
-  "EnableColorCoding": true,
-  "UseAmmoPenetrationTiers": true,
+  "_comment": "Colors only. Every other setting is in the F12 in-game menu under QuickSell. Restart the game after editing. Delete this file to restore defaults.",
+
   "BestTradeColor": "FFFFFF",
-  "PriceTierThresholds": [
-    900,
-    12000,
-    21000,
-    38000,
-    92000
-  ],
-  "AmmoTierThresholds": [
-    15,
-    25,
-    34,
-    43,
-    55
-  ],
-  "TierColors": [
-    "9D9D9D",
-    "FFFFFF",
-    "1EFF00",
-    "0070DD",
-    "A335EE",
-    "FF8000"
-  ]
+
+  "_TierColors": "Six colors, cheapest to most valuable: poor, common, uncommon, rare, epic, legendary.",
+  "TierColors": ["9D9D9D", "FFFFFF", "1EFF00", "0070DD", "A335EE", "FF8000"],
+
+  "_PriceTierThresholds": "Price PER SLOT at which each tier starts. Five values, so anything above the last is the sixth color.",
+  "PriceTierThresholds": [900, 12000, 21000, 38000, 92000],
+
+  "_AmmoTierThresholds": "Armour penetration bands used for ammo instead of price. Five values.",
+  "AmmoTierThresholds": [15, 25, 34, 43, 55]
 }

@@ -53,6 +53,12 @@ namespace QuickSell.Patches
                 .Where(trader => !trader.Settings.AvailableInRaid)
                 .ToArray();
 
+            // Publish the names into the F12 menu so the blacklist box has a reference list to
+            // copy from. Traders do not exist when the plugin binds its settings, so this is the
+            // first point at which the list can be filled in - and modded traders appear here
+            // automatically, since nothing about the list is hardcoded.
+            Plugin.PublishTraderList(_traders.Select(t => t.LocalizedName));
+
             return _traders;
         }
 
@@ -117,7 +123,9 @@ namespace QuickSell.Patches
 
             foreach (var trader in traders)
             {
-                if (Plugin.TradersBlacklist.Contains(trader.LocalizedName)) continue;
+                // Matches on display name or id, so non-English clients (where LocalizedName is
+                // translated) still have a way to blacklist reliably.
+                if (Plugin.IsBlacklisted(trader.LocalizedName, trader.Id)) continue;
 
                 var price = trader.GetUserItemPrice(item);
                 if (price == null) continue;
