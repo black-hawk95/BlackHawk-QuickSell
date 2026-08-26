@@ -80,29 +80,6 @@ The price table is fetched **once per client at startup**, never on a timer. On 
 
 Nothing is hardcoded. The trader list comes from the server, and any trader that does not buy an item is skipped. Traders released in future work with no changes.
 
-## Building
-
-**Client:**
-```
-cd Tarkov-QuickSell
-dotnet build -c Release -p:SptPath="C:\Path\To\SPT"
-```
-
-**Server:**
-```
-cd QuickSell-Server
-dotnet build -c Release -p:SptPath="C:\Path\To\SPT"
-```
-
-`SptPath` is the folder containing `BepInEx\` and `EscapeFromTarkov_Data\` — not `SPT_Runtime\`. The client needs it to compile; the server only needs it to know where to copy the built file, since its dependencies come from NuGet.
-
-Both halves must declare the same version.
-
-## AI assistance disclosure
-
-This port and its added features were produced with substantial AI assistance.
-
-Type renames came from SPT's official [Client Class Name Mappings](https://wiki.sp-tushonka.com/) table rather than guesswork. Member names absent from that table were read directly out of the installed `Assembly-CSharp.dll` by reflection, and the server API was verified the same way against `SPTarkov.Server.Core.dll`.
 
 ## License
 
