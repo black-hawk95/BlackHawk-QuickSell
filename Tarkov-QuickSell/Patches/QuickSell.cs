@@ -292,16 +292,23 @@ namespace QuickSell.Patches
                     return;
                 }
 
-                // Prices are fetched PER TEMPLATE, not per item. Selling 20 identical items used to
-                // fire 20 identical requests; flea price is a property of the template, so one
-                // lookup answers for every copy. Templates already in the cache cost nothing.
-                // TemplateId is a MongoID. It converts to string implicitly on its own, but that
-                // conversion does not carry across a sequence, so it is made explicit here.
+                // Flea price is per template; one lookup covers every copy of the same template.
                 var templates = new HashSet<string>(validItems.Select(i => i.TemplateId.ToString()));
-                var outstanding = templates.Count;
+
+                // Cache hits fire the RequestIfMissing callback synchronously, so including cached
+                // templates could double-fire the confirmation when everything is already cached.
+                var uncached = templates.Where(t => !FleaPriceCache.TryGet(t, out _)).ToList();
+
+                if (uncached.Count == 0)
+                {
+                    ShowFleaConfirmation(validItems, session);
+                    return;
+                }
+
+                var outstanding = uncached.Count;
                 var gate = new object();
 
-                foreach (var templateId in templates)
+                foreach (var templateId in uncached)
                 {
                     FleaPriceCache.RequestIfMissing(ragFair, templateId, _ =>
                     {
@@ -309,12 +316,6 @@ namespace QuickSell.Patches
                         lock (gate) { ready = --outstanding == 0; }
                         if (ready) ShowFleaConfirmation(validItems, session);
                     });
-                }
-
-                // Every template was already cached, so no callback will fire - proceed directly.
-                lock (gate)
-                {
-                    if (outstanding == 0) ShowFleaConfirmation(validItems, session);
                 }
             }
             catch (Exception ex)
