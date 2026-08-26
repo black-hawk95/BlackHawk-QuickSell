@@ -92,10 +92,21 @@ namespace QuickSell.Patches
                 // Cache hit is the common case once the stash has been browsed once.
                 if (!ResultCache.TryGetValue(id, out var suffix))
                 {
-                    suffix = BuildPriceLines(item) ?? string.Empty;
+                    suffix = BuildPriceLines(item, out var complete) ?? string.Empty;
 
-                    if (ResultCache.Count >= MaxCachedResults) ResultCache.Clear();
-                    ResultCache[id] = suffix;
+                    // Only a COMPLETE result is cached.
+                    //
+                    // RefreshAssortment is a server fetch, so the first tooltip after traders load
+                    // asks for prices before the data has arrived and every trader returns null.
+                    // Caching that empty answer froze the item without a trader line until
+                    // something cleared the cache - which is why pressing "Refresh flea prices"
+                    // appeared to fix it. Leaving an incomplete result uncached lets the next hover
+                    // recompute, so it heals itself once the assortments land.
+                    if (complete)
+                    {
+                        if (ResultCache.Count >= MaxCachedResults) ResultCache.Clear();
+                        ResultCache[id] = suffix;
+                    }
                 }
 
                 if (!string.IsNullOrEmpty(suffix)) text += suffix;
@@ -111,8 +122,17 @@ namespace QuickSell.Patches
         /// Builds the appended lines. Returns empty when neither price is available, so the tooltip
         /// is left exactly as the game made it.
         /// </summary>
-        private static string BuildPriceLines(Item item)
+        /// <summary>
+        /// Builds the appended lines.
+        ///
+        /// <paramref name="complete"/> is false when a line that should be present is still
+        /// pending - trader assortments loading, or a flea price not yet known. The caller uses it
+        /// to decide whether the result is worth caching.
+        /// </summary>
+        private static string BuildPriceLines(Item item, out bool complete)
         {
+            complete = true;
+
             int traderPrice = 0;
             string traderName = null;
             double fleaPrice = 0;
@@ -142,6 +162,17 @@ namespace QuickSell.Patches
                         traderName = trader.LocalizedName;
                         traderPrice = price;
                     }
+                    else if (TraderService.AssortmentsLoading(session))
+                    {
+                        // No trader bought it, but at least one is still fetching its assortment,
+                        // so "nobody buys this" is not yet a trustworthy answer.
+                        complete = false;
+                    }
+                }
+                else
+                {
+                    // No session yet; the answer may differ once there is one.
+                    complete = false;
                 }
             }
 
@@ -159,6 +190,9 @@ namespace QuickSell.Patches
                     // next hover has it. Deliberately not done in raid.
                     var ragFair = ContextMenuPatch.GetSession()?.RagFair;
                     if (ragFair != null) FleaPriceCache.RequestIfMissing(ragFair, item.TemplateId);
+
+                    // The price is on its way, so this result would be missing a line.
+                    complete = false;
                 }
             }
 

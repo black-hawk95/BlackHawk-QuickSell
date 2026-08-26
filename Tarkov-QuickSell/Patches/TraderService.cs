@@ -147,6 +147,26 @@ namespace QuickSell.Patches
         }
 
         /// <summary>
+        /// True while any trader is still fetching its assortment.
+        ///
+        /// RefreshAssortment goes to the server, so there is a window where prices are asked for
+        /// before the data exists and every trader answers null. During that window a "nobody buys
+        /// this" result is not trustworthy, and the tooltip uses this to avoid caching it.
+        /// </summary>
+        public static bool AssortmentsLoading(IEftSession session)
+        {
+            var traders = GetTraders(session);
+            if (traders == null) return false;
+
+            foreach (var trader in traders)
+            {
+                if (trader.AssortmentLoading) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Finds the trader paying the most for an item, or null if nobody buys it.
         ///
         /// Returns the price alongside the trader so callers don't have to ask again. The old code

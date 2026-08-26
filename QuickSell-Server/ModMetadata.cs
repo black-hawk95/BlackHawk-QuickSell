@@ -20,7 +20,7 @@ namespace BlackHawk.QuickSell.Server
         public string ModGuid { get; init; } = "com.blackhawk.quicksell";
         public string Name { get; init; } = "QuickSell";
         public string Author { get; init; } = "BlackHawk";
-        public Version Version { get; init; } = new("3.2.1");
+        public Version Version { get; init; } = new("3.2.2");
 
         // Pinned to 4.1.3 and above within 4.1. The server refuses to load a mod built against a
         // different core version, so this should track what it was actually built and tested on.
