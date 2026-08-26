@@ -24,16 +24,51 @@ namespace QuickSell.Patches
         private const string LightkeeperTraderId = "638f541a29ffd1183d187f57";
 
         private static Trader[] _traders;
-        private static readonly HashSet<string> AssortmentLoaded = new();
 
         /// <summary>
-        /// Clears everything. Called when the session changes so a new profile does not inherit the
-        /// previous one's traders.
+        /// Which traders have had their assortment loaded.
+        ///
+        /// Keyed on the trader OBJECT, not its id. The game rebuilds its Trader objects after a
+        /// raid - that is why the original mod hooked the Trader constructor - and the new objects
+        /// reuse the same ids. Tracking by id meant a rebuilt trader looked "already loaded" and
+        /// never had its assortment fetched, so every price came back null.
+        ///
+        /// A reference-keyed set follows the objects instead: a rebuilt trader is a different
+        /// object, so it correctly counts as not loaded.
         /// </summary>
+        private static readonly HashSet<Trader> AssortmentLoaded =
+            new(ReferenceEqualityComparer<Trader>.Instance);
+
+        /// <summary>Clears the cached traders and their assortment state.</summary>
         public static void Reset()
         {
             _traders = null;
             AssortmentLoaded.Clear();
+        }
+
+        /// <summary>
+        /// True when the cached array no longer matches what the session reports.
+        ///
+        /// After a raid the session hands back a fresh set of Trader objects while the cache still
+        /// holds the old, now-inert ones. Those return null from GetUserItemPrice for everything,
+        /// which is what produced "No items can be sold to traders" until the game was restarted.
+        ///
+        /// Comparing the first entry by reference is enough: the game replaces the whole set at
+        /// once, so one mismatch means all of them are stale. A count change catches a trader being
+        /// unlocked mid-session.
+        /// </summary>
+        private static bool CacheIsStale(IEftSession session)
+        {
+            if (_traders == null || _traders.Length == 0) return true;
+
+            var current = session.Traders;
+            if (current == null) return true;
+
+            var live = current.FirstOrDefault(t => !t.Settings.AvailableInRaid);
+            if (live == null) return true;
+
+            return !ReferenceEquals(live, _traders[0])
+                || current.Count(t => !t.Settings.AvailableInRaid) != _traders.Length;
         }
 
         /// <summary>
@@ -46,8 +81,17 @@ namespace QuickSell.Patches
         /// </summary>
         public static Trader[] GetTraders(IEftSession session)
         {
-            if (_traders != null && _traders.Length > 0) return _traders;
-            if (session == null) return null;
+            if (session == null) return _traders;
+            if (!CacheIsStale(session)) return _traders;
+
+            // Rebuilding is a Where plus a ToArray over roughly ten traders. It runs once per sell
+            // operation or uncached tooltip, never per frame, so the cost is not worth the risk of
+            // holding a stale set.
+            AssortmentLoaded.Clear();
+
+            // Tooltips cache their finished text, and any built from the previous trader objects
+            // hold prices that are now wrong.
+            TooltipPatch.Invalidate();
 
             _traders = session.Traders
                 .Where(trader => !trader.Settings.AvailableInRaid)
@@ -65,14 +109,14 @@ namespace QuickSell.Patches
         /// <summary>
         /// Makes sure a trader's assortment is loaded before its prices are trusted.
         ///
-        /// Tracked per trader ID so repeated sells don't re-fetch, but NOT treated as
-        /// "once per session and never again" - see EnsureAssortmentsFor for the bulk case.
+        /// Tracked per trader object so repeated sells don't re-fetch, while a trader rebuilt
+        /// after a raid is correctly treated as needing a fresh assortment.
         /// </summary>
         public static void EnsureAssortment(Trader trader)
         {
             if (trader == null) return;
             if (trader.Id == LightkeeperTraderId) return;
-            if (!AssortmentLoaded.Add(trader.Id)) return;
+            if (!AssortmentLoaded.Add(trader)) return;
 
             try
             {
@@ -139,5 +183,20 @@ namespace QuickSell.Patches
 
             return bestTrader != null;
         }
+    }
+
+    /// <summary>
+    /// Compares by object identity rather than by Equals.
+    ///
+    /// .NET provides a non-generic ReferenceEqualityComparer, but only from .NET 5 onwards - this
+    /// plugin targets netstandard2.1, so it is supplied here.
+    /// </summary>
+    internal sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
+    {
+        public static readonly ReferenceEqualityComparer<T> Instance = new();
+
+        public bool Equals(T x, T y) => ReferenceEquals(x, y);
+
+        public int GetHashCode(T obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
     }
 }
