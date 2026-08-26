@@ -20,7 +20,7 @@ namespace BlackHawk.QuickSell.Server
         public string ModGuid { get; init; } = "com.blackhawk.quicksell";
         public string Name { get; init; } = "QuickSell";
         public string Author { get; init; } = "BlackHawk";
-        public Version Version { get; init; } = new("3.2.2");
+        public Version Version { get; init; } = new("3.2.3");
 
         // Pinned to 4.1.3 and above within 4.1. The server refuses to load a mod built against a
         // different core version, so this should track what it was actually built and tested on.
@@ -31,7 +31,7 @@ namespace BlackHawk.QuickSell.Server
 
         // Original author credited here as well as in the README, since this is what the server
         // and the Forge read.
-        public List<string> Contributors { get; init; } = new() { "TadMaj (original mod)", "Tyfon (UI Fixes interop)" };
+        public List<string> Contributors { get; init; } = new() { "TadMaj (original mod)", "Tyfon (UI Fixes interop)", "925316 (flea duplicate-offer fix)" };
 
         public List<string> Incompatibilities { get; init; } = new();
         public Dictionary<string, Range> ModDependencies { get; init; } = new();

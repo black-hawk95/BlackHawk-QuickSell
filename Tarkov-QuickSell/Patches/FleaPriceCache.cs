@@ -2,6 +2,7 @@ using EFT;
 using EFT.UI.Ragfair;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace QuickSell.Patches
 {
@@ -26,6 +27,12 @@ namespace QuickSell.Patches
     {
         private static readonly Dictionary<string, double> Prices = new();
         private static readonly HashSet<string> Pending = new();
+
+        /// <summary>
+        /// Callbacks that arrived while a request for the same template was already in flight.
+        /// They all run once that request resolves.
+        /// </summary>
+        private static readonly Dictionary<string, List<Action<double>>> Waiting = new();
 
         /// <summary>Number of prices currently held. Used for logging.</summary>
         public static int Count => Prices.Count;
@@ -73,7 +80,25 @@ namespace QuickSell.Patches
                 return;
             }
 
-            if (!Pending.Add(templateId)) return;
+            // A request for this template is already in flight, most likely started by a tooltip.
+            // Returning here without calling back would leave a caller that is counting responses
+            // waiting forever - the flea confirmation window would simply never appear. Queue the
+            // callback instead so it runs when the in-flight request resolves.
+            if (!Pending.Add(templateId))
+            {
+                if (onResolved != null)
+                {
+                    if (!Waiting.TryGetValue(templateId, out var queue))
+                    {
+                        queue = new List<Action<double>>();
+                        Waiting[templateId] = queue;
+                    }
+
+                    queue.Add(onResolved);
+                }
+
+                return;
+            }
 
             try
             {
@@ -81,16 +106,38 @@ namespace QuickSell.Patches
                 {
                     Pending.Remove(templateId);
 
-                    if (result == null) return;
+                    if (result != null) Prices[templateId] = result.avg;
 
-                    Prices[templateId] = result.avg;
-                    onResolved?.Invoke(result.avg);
+                    // Everyone waiting on this template is notified, whether the lookup succeeded
+                    // or not. A caller counting responses must hear back either way, or it stalls.
+                    var value = result?.avg ?? 0d;
+
+                    onResolved?.Invoke(value);
+                    ReleaseWaiting(templateId, value);
                 });
             }
             catch (Exception ex)
             {
                 Pending.Remove(templateId);
+                ReleaseWaiting(templateId, 0d);
                 Plugin.LogSource?.LogWarning($"QuickSell: flea price lookup failed for {templateId}: {ex.Message}");
+            }
+        }
+
+        /// <summary>Runs and clears any callbacks queued behind an in-flight request.</summary>
+        private static void ReleaseWaiting(string templateId, double value)
+        {
+            if (!Waiting.TryGetValue(templateId, out var queue)) return;
+
+            Waiting.Remove(templateId);
+
+            foreach (var callback in queue)
+            {
+                try { callback(value); }
+                catch (Exception ex)
+                {
+                    Plugin.LogSource?.LogWarning($"QuickSell: queued price callback threw: {ex.Message}");
+                }
             }
         }
 
@@ -99,6 +146,11 @@ namespace QuickSell.Patches
         {
             Prices.Clear();
             Pending.Clear();
+
+            // Anything still waiting is released so no caller is left hanging on a request that
+            // will now never resolve.
+            foreach (var templateId in Waiting.Keys.ToList()) ReleaseWaiting(templateId, 0d);
+            Waiting.Clear();
         }
     }
 }
