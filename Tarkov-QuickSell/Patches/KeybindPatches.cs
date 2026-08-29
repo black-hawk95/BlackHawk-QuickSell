@@ -101,9 +101,10 @@ namespace QuickSell.Patches
                 if (item == null)
                     return;
 
-                if (item.GetAllParentItems().Any(x => x is InventoryEquipment))
-                    return;
-                if (item.Parent?.Container?.ParentItem?.TemplateId == "55d7217a4bdc2d86028b456d")
+                // The same check the context menu uses, so a keybind can never sell something the
+                // right-click menu would refuse. These were separate copies of the same logic
+                // before, which is exactly how the two drift apart.
+                if (!SellLocation.IsSellable(item))
                     return;
 
                 if (fleaDown)

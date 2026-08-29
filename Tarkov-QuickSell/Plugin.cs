@@ -12,11 +12,13 @@ using UnityEngine;
 
 namespace QuickSell
 {
-    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "3.2.3")]
+    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "3.3.0")]
     // UI Fixes 6.0 (SPT 4.1) changed its GUID from "Tyfon.UIFixes" to "com.tyfon.uifixes".
     // Both are declared so load order is correct against either version.
+    // Only the current GUID is declared. The legacy "Tyfon.UIFixes" was kept for a while for
+    // backwards compatibility, but UI Fixes now warns in the log about mods still depending on it,
+    // and any 4.1-era build is 6.0 or newer regardless.
     [BepInDependency("com.tyfon.uifixes", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInDependency("Tyfon.UIFixes", BepInDependency.DependencyFlags.SoftDependency)]
     public class Plugin : BaseUnityPlugin
     {
         // Sections are numbered because the configuration manager sorts them alphabetically;
@@ -36,6 +38,8 @@ namespace QuickSell
         private static ConfigEntry<bool> _enableQuickSellTraders;
         private static ConfigEntry<bool> _showConfirmationDialog;
         private static ConfigEntry<bool> _ignoreFleaCapacity;
+        private static ConfigEntry<bool> _sellFromContainers;
+        private static ConfigEntry<bool> _sellFromSecureContainer;
         private static ConfigEntry<int> _avgPricePercent;
         private static ConfigEntry<string> _tradersBlacklist;
         private static ConfigEntry<string> _availableTraders;
@@ -48,6 +52,13 @@ namespace QuickSell
         public static bool EnableQuickSellTraders => _enableQuickSellTraders?.Value ?? true;
         public static bool ShowConfirmationDialog => _showConfirmationDialog?.Value ?? true;
         public static bool IgnoreFleaCapacity => _ignoreFleaCapacity?.Value ?? false;
+        public static bool SellFromContainers => _sellFromContainers?.Value ?? true;
+
+        /// <summary>
+        /// Defaults to FALSE deliberately. A secure container holds what people least want to
+        /// lose, selling cannot be undone, and with multi-select one mistake takes several items.
+        /// </summary>
+        public static bool SellFromSecureContainer => _sellFromSecureContainer?.Value ?? false;
         public static double AvgPricePercent => _avgPricePercent?.Value ?? 100;
         public static bool DisableKeybinds => _disableKeybinds?.Value ?? false;
 
@@ -160,6 +171,23 @@ namespace QuickSell
                     "Normally QuickSell refuses to list more items than you have slots for. With " +
                     "this on it will try anyway, and the server rejects whatever does not fit.",
                     null, new ConfigurationManagerAttributes { Order = 96 }));
+
+            _sellFromContainers = Config.Bind(SectionSelling, "Sell from backpack, rig and pockets", true,
+                new ConfigDescription(
+                    "Lets you sell items sitting in your backpack, tactical rig or pockets, not just " +
+                    "the stash.\n\n" +
+                    "Handy for clearing out what you brought back from a raid without moving it to " +
+                    "the stash first.\n\n" +
+                    "Your secure container is never included, whatever this is set to.",
+                    null, new ConfigurationManagerAttributes { Order = 90 }));
+
+            _sellFromSecureContainer = Config.Bind(SectionSelling, "Sell from secure container", false,
+                new ConfigDescription(
+                    "Lets you sell items inside your secure container.\n\n" +
+                    "Off by default. A secure container usually holds the things you least want to " +
+                    "lose, selling cannot be undone, and with UI Fixes multi-select a mis-click " +
+                    "takes several items at once.",
+                    null, new ConfigurationManagerAttributes { Order = 89 }));
 
             _tradersBlacklist = Config.Bind(SectionSelling, "Never sell to", "",
                 new ConfigDescription(

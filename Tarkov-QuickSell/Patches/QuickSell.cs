@@ -126,8 +126,10 @@ namespace QuickSell.Patches
             if (Singleton<MenuUI>.Instantiated &&
                 Singleton<MenuUI>.Instance.HideoutAreaTransferItemsScreen != null &&
                 Singleton<MenuUI>.Instance.HideoutAreaTransferItemsScreen.isActiveAndEnabled) return;
-            if (item.GetAllParentItems().Any(x => x is InventoryEquipment)) return;
-            if (item.Parent?.Container?.ParentItem?.TemplateId == "55d7217a4bdc2d86028b456d") return;
+
+            // Where an item may be sold from - stash, and optionally containers you are carrying.
+            // See SellLocation.
+            if (!SellLocation.IsSellable(item)) return;
 
             // Was .Dictionary_0 in 4.0. The public DynamicInteractions property is a read-only
             // IEnumerable, so the backing dictionary is needed in order to add entries.
