@@ -195,18 +195,22 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
+                        // One gate shared by every item in this batch, so the confirmation sound
+                        // plays once for the whole sale instead of once per item.
+                        var soundGate = new SellSoundGate();
+
                         if (IsMultiSelectActive())
                         {
                             MultiSelect.Apply(selected =>
                             {
                                 if (selected != null && byId.TryGetValue(selected.Id, out var offer))
-                                    ExecuteTraderSale(offer.Item, offer.Trader, offer.Price);
+                                    ExecuteTraderSale(offer.Item, offer.Trader, offer.Price, soundGate.OnResult);
                             }, ItemUiContext.Instance);
                             return;
                         }
 
                         foreach (var offer in offers)
-                            ExecuteTraderSale(offer.Item, offer.Trader, offer.Price);
+                            ExecuteTraderSale(offer.Item, offer.Trader, offer.Price, soundGate.OnResult);
                     },
                     "to the traders",
                     offers.Count,
@@ -220,7 +224,7 @@ namespace QuickSell.Patches
         }
 
         /// <summary>Sells one item to an already-chosen trader at an already-known price.</summary>
-        private static void ExecuteTraderSale(Item item, Trader trader, int price)
+        private static void ExecuteTraderSale(Item item, Trader trader, int price, Action<IResult> onResult)
         {
             try
             {
@@ -236,7 +240,7 @@ namespace QuickSell.Patches
                     trader.Id,
                     [new TradingItemReference { Item = item, Count = item.StackObjectsCount }],
                     price,
-                    new Callback(PlaySellSound));
+                    new Callback(onResult));
             }
             catch (Exception ex)
             {
@@ -358,12 +362,16 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
+                        // One gate shared by every item in this batch, so the confirmation sound
+                        // plays once for the whole sale instead of once per item.
+                        var soundGate = new SellSoundGate();
+
                         if (IsMultiSelectActive())
                         {
                             MultiSelect.Apply(selected =>
                             {
                                 if (selected != null && prices.TryGetValue(selected.Id, out var price))
-                                    DoFleaOffer(selected, session, price);
+                                    DoFleaOffer(selected, session, price, soundGate.OnResult);
                             }, ItemUiContext.Instance);
                             return;
                         }
@@ -371,7 +379,7 @@ namespace QuickSell.Patches
                         foreach (var candidate in validItems)
                         {
                             if (prices.TryGetValue(candidate.Id, out var price))
-                                DoFleaOffer(candidate, session, price);
+                                DoFleaOffer(candidate, session, price, soundGate.OnResult);
                         }
                     },
                     "on the flea",
@@ -386,7 +394,7 @@ namespace QuickSell.Patches
             }
         }
 
-        private static void DoFleaOffer(Item item, IEftSession session, int price)
+        private static void DoFleaOffer(Item item, IEftSession session, int price, Action<IResult> onResult)
         {
             try
             {
@@ -400,7 +408,7 @@ namespace QuickSell.Patches
                     }
                 };
 
-                session.RagfairAddOffer(false, [item.Id], [.. requirements], new Callback(PlaySellSound));
+                session.RagfairAddOffer(false, [item.Id], [.. requirements], new Callback(onResult));
             }
             catch (Exception ex)
             {
@@ -411,10 +419,22 @@ namespace QuickSell.Patches
 
         // ------------------------------------------------------------------ shared
 
-        private static void PlaySellSound(IResult result)
+        /// <summary>
+        /// Shared by every sale in one QuickSell batch so the trade-complete sound plays once for
+        /// the whole operation instead of once per item. Each item's sale still gets its own
+        /// ConfirmSell/RagfairAddOffer callback (needed for correct game-state handling), but they
+        /// all report into the same gate, and only the first successful result triggers the sound.
+        /// </summary>
+        private sealed class SellSoundGate
         {
-            if (result.Succeed)
+            private bool _played;
+
+            public void OnResult(IResult result)
+            {
+                if (_played || !result.Succeed) return;
+                _played = true;
                 Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.TradeOperationComplete);
+            }
         }
 
         private static bool IsMultiSelectActive()
