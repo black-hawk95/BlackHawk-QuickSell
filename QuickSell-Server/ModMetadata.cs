@@ -24,7 +24,7 @@ namespace BlackHawk.QuickSell.Server
 
         // Pinned to 4.1.3 and above within 4.1. The server refuses to load a mod built against a
         // different core version, so this should track what it was actually built and tested on.
-        public Range SptVersion { get; init; } = new("~4.1.3");
+        public Range SptVersion { get; init; } = new(">=4.1.3 <4.2.0");
 
         public string License { get; init; } = "MIT";
         public string Url { get; init; } = "https://github.com/TadMaj/Tarkov-QuickSell";
