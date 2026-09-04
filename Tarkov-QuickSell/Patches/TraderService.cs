@@ -203,6 +203,57 @@ namespace QuickSell.Patches
 
             return bestTrader != null;
         }
+
+        /// <summary>
+        /// Finds the best price for this physical item alone. GetUserItemPrice recursively includes
+        /// attached children, which is correct for a normal trader sale but would double-count
+        /// those children while SmartSell is deciding a route for every component independently.
+        /// </summary>
+        public static bool TryGetBestStandaloneOffer(
+            Item item, IEftSession session, out Trader bestTrader, out int bestPrice)
+        {
+            bestTrader = null;
+            bestPrice = 0;
+
+            var traders = GetTraders(session);
+            if (traders == null) return false;
+
+            foreach (var trader in traders)
+            {
+                if (Plugin.IsBlacklisted(trader.LocalizedName, trader.Id)) continue;
+                // The Item overload recursively checks every attached child. SmartSell is asking
+                // about this component alone, so only its own template belongs in the decision.
+                if (!trader.Info.CanBuyItem(item.Template)) continue;
+
+                // Reuse the trader's loaded supply prices rather than global handbook prices.
+                var supplyData = Compat.Get<SupplyData>(trader, "_supplyData");
+                if (supplyData == null) continue;
+
+                var currencyId = CurrencyUtil.GetCurrencyId(trader.Settings.Currency);
+                if (!trader.CurrencyCourses.TryGetValue(currencyId, out var currencyCourse)
+                    || currencyCourse <= 0d)
+                    continue;
+
+                // Mirror GetUserItemPrice's calculation and rounding, replacing only its recursive
+                // base-price call. The result remains denominated in this trader's payout currency.
+                var value = PriceCalculator.CalculateBuyoutBasePriceForSingleItem(
+                    item, 0, supplyData, trader.Settings.BuyerUp);
+                value /= currencyCourse;
+                value = trader.Info.ApplyPriceModifier(value);
+                value = PriceCalculator.ApplyCustomPriceIfNeeded(item, value);
+
+                var price = Convert.ToInt32(Math.Floor(value));
+                if (price <= 0) continue;
+
+                if (bestTrader == null || price > bestPrice)
+                {
+                    bestTrader = trader;
+                    bestPrice = price;
+                }
+            }
+
+            return bestTrader != null;
+        }
     }
 
     /// <summary>

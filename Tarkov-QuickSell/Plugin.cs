@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace QuickSell
 {
-    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "3.3.0")]
+    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "3.5.4")]
     // UI Fixes 6.0 (SPT 4.1) changed its GUID from "Tyfon.UIFixes" to "com.tyfon.uifixes".
     // Both are declared so load order is correct against either version.
     // Only the current GUID is declared. The legacy "Tyfon.UIFixes" was kept for a while for
@@ -128,7 +128,12 @@ namespace QuickSell
             new ContextMenuShowPatch().Enable();
             new ContextMenuShowMenuPatch().Enable();
 
-            if (ShowPriceTooltips) new TooltipPatch().Enable();
+            if (ShowPriceTooltips)
+            {
+                // Hover text and the opened item card use the same instance-based recommendation.
+                new TooltipPatch().Enable();
+                new ItemSpecificationPricePatch().Enable();
+            }
             if (OverrideTooltipDelay) TooltipDelayPatch.TryEnable();
 
             if (!DisableKeybinds) KeybindPatches.Enable();
@@ -233,8 +238,10 @@ namespace QuickSell
 
             KeybindFlea = Config.Bind(SectionSelling, "Sell on flea (key)", new KeyboardShortcut(KeyCode.N),
                 new ConfigDescription(
-                    "Sells the item under the cursor on the flea market.\n\n" +
-                    "Works on a multi-selection when UI Fixes is installed.",
+                    "Splits the item into its physical components. Compares flea proceeds after " +
+                    "commission with trader quotes, lists the chosen flea items first, then sells " +
+                    "the remaining components to traders. The offer-slot setting controls whether the flea limit is " +
+                    "respected.\n\nWorks on a multi-selection when UI Fixes is installed.",
                     null, new ConfigurationManagerAttributes { Order = 92 }));
 
             KeybindTraders = Config.Bind(SectionSelling, "Sell to trader (key)", new KeyboardShortcut(KeyCode.M),

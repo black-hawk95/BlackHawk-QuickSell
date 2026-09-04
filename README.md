@@ -14,11 +14,26 @@ This port was uploaded to keep the mod available on SPT 4.1.3. If TadMaj asks me
 Sell stash items fast — to whichever trader pays most, or straight onto the flea.
 
 - **Context menu:** right-click any stash item for **QuickSell (Flea)** and **QuickSell (Trader)**
-- **Keybinds:** `N` flea, `M` traders
-- **Price tooltips:** best trader price and flea price on hover, colour-coded by value
+- **Keybinds:** `N` splits item trees and sends every part to whichever pays more — flea net of
+  listing fee or the best trader — listing flea items first; `M` sells the selected roots to traders only
+- **Price tooltips and item card:** show the winning available trader/flea quote, with flea
+  commission deducted, tier colours and value per occupied inventory cell for larger items
 - **Multi-select:** with UI Fixes installed, sell many items in one confirmation
+- **Complete-item pricing:** assembled weapons and other compound items include the flea value of
+  every attached or contained part instead of being listed for the root item's price alone
+- **Condition-aware pricing:** partially consumed drinks, food, medkits, fuel, repair kits, used
+  keys and damaged equipment have their flea price reduced using EFT's own condition valuation
 
-Traders are picked automatically by best offer. Flea listings use the average market price.
+Traders are picked automatically by best offer. Flea listings use the configured market-price
+percentage, and the `N` workflow compares their proceeds after commission with the trader offer.
+The hover/item-card recommendation uses the market minimum independently of that listing percentage.
+The server table uses standalone simulated-player offers, excluding trader, human-player and
+composite offers; missing templates fall back to the game's per-template market minimum.
+
+The existing **Ignore offer slot limit** setting still applies. With the limit enabled, `N`
+prioritizes the largest estimated gain over trader sales; rejected flea offers fall back to traders.
+Explicit right-click entries remain route-specific: **QuickSell (Flea)** lists the complete item
+tree as one offer, while **QuickSell (Trader)** and `M` sell the selected roots to traders.
 
 ## Installation
 

@@ -109,7 +109,9 @@ namespace QuickSell.Patches
 
                 if (fleaDown)
                 {
-                    ContextMenuPatch.SellToFlea(item);
+                    // Preserve the existing configurable N binding, but route it through smart
+                    // component sales. Explicit context-menu actions still force their own route.
+                    SmartSell.Sell(item);
                     return;
                 }
 
