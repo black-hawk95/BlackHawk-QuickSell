@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
+using SPTarkov.Server.Core.Extensions;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Servers.Http;
 using SPTarkov.Server.Core.Services.Ragfair;
@@ -23,7 +24,7 @@ namespace BlackHawk.QuickSell.Server
     /// The result is cached here, so N Fika players connecting costs one computation rather than N.
     ///
     /// Notes on the 4.1 API, since several things moved:
-    ///  - RagfairPriceService is now in Services.Ragfair, not Services.
+    ///  - RagfairOfferService supplies the live offer pool from Services.Ragfair.
     ///  - ISptLogger moved out of Core into SPTarkov.Common.Models.Logging.
     ///  - Load order is expressed relative to OnLoadOrder.Routers. A route on a URL SPT does not
     ///    already handle goes ABOVE it: there is nothing of SPT's to order against, and no reason
@@ -32,7 +33,7 @@ namespace BlackHawk.QuickSell.Server
     [Injectable(InjectionType = InjectionType.Singleton, TypePriority = OnLoadOrder.Routers + 1)]
     public class FleaPriceEndpoint(
         ISptLogger<FleaPriceEndpoint> logger,
-        RagfairPriceService ragfairPriceService) : IHttpListener
+        RagfairOfferService ragfairOfferService) : IHttpListener
     {
         private const string RoutePrefix = "/quicksell";
         private const string RouteGetFleaPrices = "/quicksell/getFleaPrices";
@@ -80,6 +81,7 @@ namespace BlackHawk.QuickSell.Server
             }
         }
 
+        /// <summary>Builds cached per-template minimums from standalone simulated-player offers.</summary>
         private async Task<Dictionary<string, double>> GetPricesAsync(CancellationToken cancellationToken)
         {
             if (_nextUpdate > DateTime.UtcNow && _cached.Count > 0) return _cached;
@@ -94,21 +96,38 @@ namespace BlackHawk.QuickSell.Server
 
                 var stopwatch = Stopwatch.StartNew();
 
-                var source = ragfairPriceService.GetAllFleaPrices();
-                var result = new Dictionary<string, double>(source.Count);
-
-                foreach (var entry in source)
+                // GetOffers contains trader assortments, human listings and simulated-player
+                // listings. The displayed flea minimum must come exclusively from the last group;
+                // otherwise a trader offer can masquerade as a flea-market price.
+                //
+                // Composite offers remain excluded: RequirementsCost already includes attached
+                // parts, while the client independently adds every part in the actual item tree.
+                // Including a complete weapon offer here would therefore count its mods twice.
+                var result = new Dictionary<string, double>();
+                var fakeOfferCount = 0;
+                foreach (var offer in ragfairOfferService.GetOffers())
                 {
-                    var price = entry.Value;
-                    if (price > 0d && !double.IsNaN(price) && !double.IsInfinity(price))
-                        result[entry.Key.ToString()] = price;
+                    if (!offer.IsFakePlayerOffer()) continue;
+                    if (offer.Items is null || offer.Items.Count != 1) continue;
+
+                    var price = offer.RequirementsCost;
+                    if (!price.HasValue || price.Value <= 0d || double.IsNaN(price.Value) || double.IsInfinity(price.Value)) continue;
+
+                    fakeOfferCount++;
+                    var templateId = offer.Items[0].Template.ToString();
+                    if (!result.TryGetValue(templateId, out var current) || price.Value < current)
+                    {
+                        result[templateId] = price.Value;
+                    }
                 }
 
                 _cached = result;
                 _nextUpdate = DateTime.UtcNow.Add(CacheDuration);
 
                 stopwatch.Stop();
-                logger.Info($"[QuickSell] Built flea price table: {result.Count} items in {stopwatch.ElapsedMilliseconds}ms.");
+                logger.Info(
+                    $"[QuickSell] Built fake-player flea minimums: {result.Count} items " +
+                    $"from {fakeOfferCount} standalone offers in {stopwatch.ElapsedMilliseconds}ms.");
 
                 return _cached;
             }

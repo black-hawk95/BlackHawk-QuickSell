@@ -1,4 +1,8 @@
+using Comfort.Common;
 using EFT;
+using EFT.HandBook;
+using EFT.InventoryLogic;
+using EFT.Trading;
 using EFT.UI.Ragfair;
 using System;
 using System.Collections.Generic;
@@ -64,6 +68,84 @@ namespace QuickSell.Patches
         }
 
         /// <summary>
+        /// Returns the minimum flea value of one unit of an item together with everything that
+        /// will be included when that item is listed. A weapon offer, for example, contains its
+        /// mods, magazine and ammunition even though RagfairAddOffer receives only the weapon id.
+        ///
+        /// The old code looked up only the root template. That listed the complete item tree but
+        /// priced it as the bare receiver, effectively giving every child item away for free.
+        /// </summary>
+        public static bool TryGetTreeUnitPrice(Item root, out double price, ISet<string> missing = null)
+        {
+            price = 0d;
+            if (root == null) return false;
+
+            var complete = true;
+
+            foreach (var part in root.GetAllItems())
+            {
+                var templateId = part.TemplateId.ToString();
+                if (!Prices.TryGetValue(templateId, out var unitPrice))
+                {
+                    complete = false;
+                    missing?.Add(templateId);
+                    continue;
+                }
+
+                // The requirement price supplied to RagfairAddOffer is per root unit. A stack of
+                // loose ammunition therefore stays a per-round price, while ammunition contained
+                // inside a magazine contributes the value of every round to that magazine's one
+                // offer unit.
+                var count = ReferenceEquals(part, root) ? 1 : Math.Max(1, part.StackObjectsCount);
+                price += GetConditionAdjustedUnitPrice(part, unitPrice) * count;
+            }
+
+            return complete;
+        }
+
+        /// <summary>
+        /// Applies EFT's own condition/resource valuation to a market price. This covers partially
+        /// consumed food, drinks, medkits, fuel and repair kits, used keys and damaged equipment.
+        /// The factor is capped at one so unrelated premiums (for example dogtag level or an item
+        /// enhancement) do not inflate a template-wide flea price.
+        /// </summary>
+        public static double GetConditionAdjustedUnitPrice(Item item, double marketUnitPrice)
+        {
+            if (item == null || marketUnitPrice <= 0d) return 0d;
+
+            try
+            {
+                var handbook = Singleton<Handbook>.Instance;
+                var count = Math.Max(1, item.StackObjectsCount);
+                // Matching stack counts in numerator and denominator leave a per-unit factor.
+                var fullBasePrice = handbook.GetBasePrice(item.TemplateId) * (double)count;
+                if (fullBasePrice <= 0d) return marketUnitPrice;
+
+                var currentBasePrice = PriceCalculator.CalculateBasePriceForSingleItem(
+                    item, count, handbook);
+                var conditionFactor = Math.Max(0d, Math.Min(1d, currentBasePrice / fullBasePrice));
+                return marketUnitPrice * conditionFactor;
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource?.LogWarning(
+                    $"QuickSell: condition adjustment failed for {item.TemplateId}: {ex.Message}");
+                return marketUnitPrice;
+            }
+        }
+
+        /// <summary>Every template whose price is needed to value the complete item tree.</summary>
+        public static IEnumerable<string> GetTreeTemplateIds(Item root)
+        {
+            if (root == null) yield break;
+
+            foreach (var part in root.GetAllItems())
+            {
+                yield return part.TemplateId.ToString();
+            }
+        }
+
+        /// <summary>
         /// Returns a cached price, or asks the game for it if unknown.
         ///
         /// Only safe outside raid - the request is asynchronous and its callback arrives later.
@@ -106,11 +188,12 @@ namespace QuickSell.Patches
                 {
                     Pending.Remove(templateId);
 
-                    if (result != null) Prices[templateId] = result.avg;
+                    // Keep the fallback aligned with the server table's minimum-price semantics.
+                    if (result != null) Prices[templateId] = result.min;
 
                     // Everyone waiting on this template is notified, whether the lookup succeeded
                     // or not. A caller counting responses must hear back either way, or it stalls.
-                    var value = result?.avg ?? 0d;
+                    var value = result?.min ?? 0d;
 
                     onResolved?.Invoke(value);
                     ReleaseWaiting(templateId, value);
@@ -119,6 +202,8 @@ namespace QuickSell.Patches
             catch (Exception ex)
             {
                 Pending.Remove(templateId);
+                // Release both the original caller and queued callers on synchronous failure.
+                onResolved?.Invoke(0d);
                 ReleaseWaiting(templateId, 0d);
                 Plugin.LogSource?.LogWarning($"QuickSell: flea price lookup failed for {templateId}: {ex.Message}");
             }

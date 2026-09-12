@@ -98,6 +98,18 @@ namespace QuickSell.Patches
             return mainMenu == null ? null : Compat.Get<IEftSession>(mainMenu, "iEftSession");
         }
 
+        /// <summary>
+        /// Quiet inventory lookup for tooltip checks. Unlike GetMainMenu this must not show an
+        /// error popup while the menu is still being constructed.
+        /// </summary>
+        internal static OfflineInventoryController GetInventoryController()
+        {
+            var app = ClientAppUtils.GetMainApp();
+            if (app == null) return null;
+
+            return Compat.Get<MainMenuShowOperation>(app, "mainMenuControllerClass")?.InventoryController;
+        }
+
         private static MainMenuShowOperation GetMainMenu()
         {
             var app = ClientAppUtils.GetMainApp();
@@ -298,8 +310,11 @@ namespace QuickSell.Patches
                     return;
                 }
 
-                // Flea price is per template; one lookup covers every copy of the same template.
-                var templates = new HashSet<string>(validItems.Select(i => i.TemplateId.ToString()));
+                // RagfairAddOffer receives only each root id, but the offer includes that root's
+                // complete item tree. Fetch prices for every component so a built weapon is not
+                // listed for the price of its bare receiver.
+                var templates = new HashSet<string>(
+                    validItems.SelectMany(FleaPriceCache.GetTreeTemplateIds));
 
                 // Cache hits fire the RequestIfMissing callback synchronously, so including cached
                 // templates could double-fire the confirmation when everything is already cached.
@@ -341,7 +356,7 @@ namespace QuickSell.Patches
 
                 foreach (var candidate in validItems)
                 {
-                    if (!FleaPriceCache.TryGet(candidate.TemplateId, out var avg)) continue;
+                    if (!FleaPriceCache.TryGetTreeUnitPrice(candidate, out var avg)) continue;
 
                     var price = (int)Math.Ceiling(avg / 100.0 * Plugin.AvgPricePercent);
                     prices[candidate.Id] = price;

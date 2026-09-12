@@ -7,7 +7,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <!-- Must match the client plugin version exactly. -->
-    <Version>3.3.0</Version>
+    <Version>3.5.4</Version>
   </PropertyGroup>
 
   <!--
@@ -54,21 +54,22 @@
     still get a DLL rather than an error.
   -->
   <Target Name="CopyToServerMods" AfterTargets="PostBuildEvent">
+    <!-- Match the client opt-out so validation/CI builds leave installed mods untouched. -->
     <MakeDir Directories="$(ServerModsPath)"
-             Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+             Condition="'$(DeployOnBuild)' != 'false' AND Exists('$(SptPath)\SPT_Runtime\user\mods')" />
 
     <Copy SourceFiles="$(TargetPath)"
           DestinationFolder="$(ServerModsPath)"
           SkipUnchangedFiles="true"
-          Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+          Condition="'$(DeployOnBuild)' != 'false' AND Exists('$(SptPath)\SPT_Runtime\user\mods')" />
 
     <Message Importance="high"
              Text="QuickSell server mod copied to $(ServerModsPath)"
-             Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+             Condition="'$(DeployOnBuild)' != 'false' AND Exists('$(SptPath)\SPT_Runtime\user\mods')" />
 
     <Message Importance="high"
              Text="NOTE: $(SptPath)\SPT_Runtime\user\mods not found, so the server mod was NOT deployed. Pass -p:SptPath=&quot;C:\Path\To\SPT&quot; to deploy it automatically."
-             Condition="!Exists('$(SptPath)\SPT_Runtime\user\mods')" />
+             Condition="'$(DeployOnBuild)' != 'false' AND !Exists('$(SptPath)\SPT_Runtime\user\mods')" />
   </Target>
 
 </Project>

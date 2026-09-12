@@ -1,5 +1,8 @@
+using EFT;
 using EFT.InventoryLogic;
+using EFT.Trading;
 using EFT.UI;
+using EFT.UI.Ragfair;
 using HarmonyLib;
 using SPT.Reflection.Patching;
 using System;
@@ -28,7 +31,7 @@ namespace QuickSell.Patches
         private static bool _assortmentsRequested;
 
         /// <summary>
-        /// Finished tooltip text, keyed by item id.
+        /// Finished tooltip text, keyed by item id and the observed item-tree state.
         ///
         /// Building these lines costs a few milliseconds, most of it in TryGetBestOffer, which asks
         /// every trader what it would pay. Measured while sweeping the cursor across a full stash
@@ -87,7 +90,10 @@ namespace QuickSell.Patches
                 var item = ItemUiContext.Instance?.CurrentItemContext?.Item;
                 if (item == null) return;
 
-                var id = item.Id.ToString();
+                // The root id does not change when a weapon is rebuilt. Include every attached
+                // item, its stack count and the current footprint so swapping a scope, magazine,
+                // ammunition or folding a stock immediately produces a fresh tooltip.
+                var id = GetItemStateKey(item);
 
                 // Cache hit is the common case once the stash has been browsed once.
                 if (!ResultCache.TryGetValue(id, out var suffix))
@@ -119,28 +125,25 @@ namespace QuickSell.Patches
         }
 
         /// <summary>
-        /// Builds the appended lines. Returns empty when neither price is available, so the tooltip
-        /// is left exactly as the game made it.
-        /// </summary>
-        /// <summary>
-        /// Builds the appended lines.
+        /// Builds a single best-route recommendation shared by hover text and the item card.
+        /// Returns empty when neither price is available, leaving the original UI text unchanged.
         ///
         /// <paramref name="complete"/> is false when a line that should be present is still
         /// pending - trader assortments loading, or a flea price not yet known. The caller uses it
         /// to decide whether the result is worth caching.
         /// </summary>
-        private static string BuildPriceLines(Item item, out bool complete)
+        internal static string BuildPriceLines(Item item, out bool complete)
         {
             complete = true;
 
             int traderPrice = 0;
             string traderName = null;
-            double fleaPrice = 0;
+            double fleaNetPrice = 0;
+            var session = ContextMenuPatch.GetSession();
 
             if (Plugin.ShowTraderPriceInTooltip)
             {
                 // Trader prices are menu-only: in raid there is no session and no trader data.
-                var session = ContextMenuPatch.GetSession();
                 if (session != null)
                 {
                     // Assortments must be loaded before GetUserItemPrice returns anything. Since
@@ -176,57 +179,89 @@ namespace QuickSell.Patches
                 }
             }
 
-            if (Plugin.ShowFleaPriceInTooltip)
+            OfflineInventoryController inventoryController = null;
+            var fleaEligibility = Plugin.ShowFleaPriceInTooltip
+                ? GetFleaEligibility(item, session, out inventoryController)
+                : FleaEligibility.ItemIneligible;
+
+            if (fleaEligibility == FleaEligibility.TemporarilyUnavailable)
             {
-                // Cache only - never a network call. This is what allows tooltips in raid without
-                // touching the server: the table was fetched once at startup.
-                if (FleaPriceCache.TryGet(item.TemplateId, out var cached))
+                // Money and offer-slot capacity can change without the item changing. Do not
+                // freeze a trader-only recommendation in the cache in that situation.
+                complete = false;
+            }
+
+            if (Plugin.ShowFleaPriceInTooltip && fleaEligibility == FleaEligibility.Eligible)
+            {
+                // The cached unit value is the sum of the minimum market prices of the root item
+                // and every installed part. CalculateTaxPrice is the same game method used by the
+                // offer window, so the comparison is trader payout versus actual flea NET payout.
+                var missing = new HashSet<string>();
+                if (FleaPriceCache.TryGetTreeUnitPrice(item, out var cached, missing))
                 {
-                    fleaPrice = cached * item.StackObjectsCount;
+                    // Tooltip recommendation is intentionally based on the market minimum itself,
+                    // independent of the configurable percentage used by the quick-list command.
+                    var listingUnitPrice = (int)Math.Ceiling(cached);
+                    var count = Math.Max(1, item.StackObjectsCount);
+                    var gross = listingUnitPrice * (double)count;
+                    var fee = (int)Math.Ceiling(
+                        PriceCalculator.CalculateTaxPrice(item, count, listingUnitPrice, false));
+
+                    if (ModEnvironment.IsInRaid || HasEnoughRoublesForFee(inventoryController, fee))
+                    {
+                        fleaNetPrice = Math.Max(0, gross - fee);
+                    }
+                    else
+                    {
+                        // The item itself is eligible, but it cannot be listed right now because
+                        // the commission cannot be paid (or could not be calculated reliably).
+                        complete = false;
+                    }
                 }
                 else if (!ModEnvironment.IsInRaid)
                 {
-                    // Outside raid an unknown template can be resolved in the background so the
-                    // next hover has it. Deliberately not done in raid.
-                    var ragFair = ContextMenuPatch.GetSession()?.RagFair;
-                    if (ragFair != null) FleaPriceCache.RequestIfMissing(ragFair, item.TemplateId);
+                    // Outside raid every unknown component can be resolved in the background so
+                    // the next hover shows the value of the complete item tree. Deliberately not
+                    // done in raid.
+                    var ragFair = session?.RagFair;
+                    if (ragFair != null)
+                    {
+                        foreach (var templateId in missing)
+                            FleaPriceCache.RequestIfMissing(ragFair, templateId);
+                    }
 
                     // The price is on its way, so this result would be missing a line.
                     complete = false;
                 }
             }
 
-            if (traderName == null && fleaPrice <= 0) return null;
+            if (traderName == null && fleaNetPrice <= 0) return null;
 
-            // Whichever pays more gets highlighted, so the "sell it here" answer is visible without
-            // comparing the numbers.
-            bool fleaWins = fleaPrice > traderPrice;
+            // On a tie the trader wins: the payout is immediate and has no offer-slot cost.
+            bool fleaWins = fleaNetPrice > traderPrice;
 
             var sb = new StringBuilder();
 
-            if (traderName != null)
+            if (fleaWins)
             {
-                AppendLine(sb, traderName, traderPrice, item, isBest: !fleaWins);
+                AppendLine(sb, "Барахолка (мин., после комиссии)", fleaNetPrice, item);
             }
-
-            if (fleaPrice > 0)
+            else if (traderName != null)
             {
-                AppendLine(sb, "Flea market", fleaPrice, item, isBest: fleaWins);
+                AppendLine(sb, traderName, traderPrice, item);
             }
 
             return sb.ToString();
         }
 
-        private static void AppendLine(StringBuilder sb, string label, double price, Item item, bool isBest)
+        /// <summary>Formats the winning quote, tier colour and optional value per occupied cell.</summary>
+        private static void AppendLine(StringBuilder sb, string label, double price, Item item)
         {
             sb.Append("<br>");
-
-            if (isBest)
-                sb.Append($"<color=#{Plugin.BestTradeColor}>{label}</color>: ");
-            else
-                sb.Append($"{label}: ");
+            sb.Append($"<color=#{Plugin.BestTradeColor}>{label}</color>: ");
 
             var formatted = PriceFormat.Format(price);
+            var perSlotFormatted = PriceFormat.Format(price / TierColors.GetSlotCount(item));
 
             if (Plugin.EnableColorCoding)
             {
@@ -237,9 +272,174 @@ namespace QuickSell.Patches
                 formatted = $"<color=#{hex}>{formatted}</color>";
             }
 
-            if (isBest) formatted = $"<b>{formatted}</b>";
+            formatted = $"<b>{formatted}</b>";
 
             sb.Append(formatted);
+
+            // For a one-cell item this would merely repeat the same number and make both the
+            // hover tooltip and the item card noisier.
+            if (TierColors.GetSlotCount(item) > 1)
+                sb.Append($" <color=#b0b0b0>({perSlotFormatted} за слот)</color>");
+        }
+
+        // Temporary failures should not be cached as a permanent item restriction.
+        private enum FleaEligibility
+        {
+            Eligible,
+            ItemIneligible,
+            TemporarilyUnavailable
+        }
+
+        /// <summary>
+        /// Uses EFT's own final selection check instead of trying to duplicate flea rules. It
+        /// covers examination, template bans, forbidden installed parts, non-empty containers,
+        /// FIR restrictions and failure to remove the item from its current address.
+        /// </summary>
+        private static FleaEligibility GetFleaEligibility(
+            Item item,
+            IEftSession session,
+            out OfflineInventoryController inventoryController)
+        {
+            inventoryController = null;
+
+            if (session?.RagFair == null || !session.RagFair.Available)
+                return FleaEligibility.ItemIneligible;
+
+            if (ModEnvironment.IsInRaid)
+            {
+                // A raid item cannot be listed until extraction, so menu-only checks such as its
+                // current address, free offer slots and cash in the stash are inapplicable. The
+                // useful answer here is whether this exact item will be eligible after extraction.
+                // CompoundItem.CanSellOnRagfair also checks forbidden installed components.
+                if (!item.CanSellOnRagfair || item.IsNotEmpty())
+                    return FleaEligibility.ItemIneligible;
+
+                if (RagFair.Settings.isOnlyFoundInRaidAllowed &&
+                    !item.CanSellOnRagfairRaidRelated)
+                    return FleaEligibility.ItemIneligible;
+
+                return FleaEligibility.Eligible;
+            }
+
+            inventoryController = ContextMenuPatch.GetInventoryController();
+            if (inventoryController == null || inventoryController is not ItemController itemController)
+                return FleaEligibility.TemporarilyUnavailable;
+
+            if (!SellLocation.IsSellable(item))
+                return FleaEligibility.ItemIneligible;
+
+            var helper = new RagfairNewOfferContext(
+                inventoryController.Inventory.Stash.Grids[0], itemController);
+
+            if (!helper.HighlightedAtRagfair(item) ||
+                !RagFair.CanBeSelectedAtRagfair(item, itemController, out _))
+                return FleaEligibility.ItemIneligible;
+
+            if (!Plugin.IgnoreFleaCapacity &&
+                session.RagFair.MyOffersCount >=
+                session.RagFair.GetMaxOffersCount(session.RagFair.MyRating))
+                return FleaEligibility.TemporarilyUnavailable;
+
+            return FleaEligibility.Eligible;
+        }
+
+        /// <summary>Checks stash RUB funds using the same inventory money aggregation as EFT.</summary>
+        private static bool HasEnoughRoublesForFee(
+            OfflineInventoryController inventoryController,
+            int fee)
+        {
+            if (inventoryController == null || fee < 0) return false;
+            if (fee == 0) return true;
+
+            var money = InventoryExtension.GetMoneySums(
+                inventoryController.Inventory.Stash.Grid.ContainedItems.Keys);
+
+            return money.TryGetValue(ECurrencyType.RUB, out var roubles) && roubles >= fee;
+        }
+
+        /// <summary>
+        /// Fingerprints the item tree, footprint and observed eligibility state for hover caching.
+        /// Price-table/session changes are handled separately by Invalidate.
+        /// </summary>
+        private static string GetItemStateKey(Item item)
+        {
+            unchecked
+            {
+                var hash = 17;
+                foreach (var part in item.GetAllItems())
+                {
+                    hash = hash * 31 + part.Id.ToString().GetHashCode();
+                    hash = hash * 31 + part.TemplateId.ToString().GetHashCode();
+                    hash = hash * 31 + part.StackObjectsCount;
+                    hash = hash * 31 + part.SpawnedInSession.GetHashCode();
+                    hash = hash * 31 + part.CanSellOnRagfair.GetHashCode();
+                    hash = hash * 31 + part.CanSellOnRagfairRaidRelated.GetHashCode();
+                    hash = hash * 31 + part.PinLockState.GetHashCode();
+                }
+
+                var size = item.CalculateCellSize();
+                hash = hash * 31 + size.X;
+                hash = hash * 31 + size.Y;
+                hash = hash * 31 + ModEnvironment.IsInRaid.GetHashCode();
+
+                var session = ContextMenuPatch.GetSession();
+                hash = hash * 31 + (session?.RagFair?.Available ?? false).GetHashCode();
+
+                var inventoryController = ContextMenuPatch.GetInventoryController();
+                if (inventoryController != null)
+                    hash = hash * 31 + inventoryController.Examined(item).GetHashCode();
+
+                return $"{item.Id}:{hash:X8}";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replaces the old server-generated template valuation in the opened item card with a value
+    /// calculated from the concrete item instance. This makes FIR, condition and weapon parts
+    /// accurate and lets the same recommendation be used in the card and hover tooltip.
+    /// </summary>
+    internal class ItemSpecificationPricePatch : ModulePatch
+    {
+        // Cache reflection handles once; these fields belong to the SPT 4.1.3 EFT item panel.
+        private static readonly FieldInfo ItemField =
+            AccessTools.Field(typeof(ItemSpecificationPanel), "_item");
+        private static readonly FieldInfo LabelsField =
+            AccessTools.Field(typeof(ItemSpecificationPanel), "_itemLabels");
+
+        // Hook description refresh so the concrete item recommendation appears in the item card.
+        protected override MethodBase GetTargetMethod()
+            => AccessTools.Method(typeof(ItemSpecificationPanel), "method_1");
+
+        [PatchPostfix]
+        private static void Postfix(ItemSpecificationPanel __instance)
+        {
+            try
+            {
+                // Match hover visibility settings and do not reveal prices for unexamined items.
+                if (!Plugin.ShowPriceTooltips ||
+                    (ModEnvironment.IsInRaid && !Plugin.ShowPricesInRaid) ||
+                    !__instance.Examined)
+                    return;
+
+                var item = ItemField?.GetValue(__instance) as Item;
+                var labels = LabelsField?.GetValue(__instance) as ItemInfoWindowLabels;
+                if (item == null || labels?._description == null) return;
+
+                var lines = TooltipPatch.BuildPriceLines(item, out _);
+                if (string.IsNullOrEmpty(lines)) return;
+
+                // BuildPriceLines starts with <br> because it normally appends to a tooltip.
+                // In the card the recommendation is the first line instead.
+                if (lines.StartsWith("<br>", StringComparison.Ordinal))
+                    lines = lines.Substring(4);
+
+                labels.SetDescriptionText($"{lines}<br><br>{labels._description.text}");
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource?.LogWarning($"QuickSell: item-card price failed: {ex.Message}");
+            }
         }
     }
 
@@ -265,7 +465,7 @@ namespace QuickSell.Patches
         /// Grid footprint of the item, minimum 1. Guarded because the cell-size API is one of the
         /// less stable corners of the game and a colour is not worth an exception on every hover.
         /// </summary>
-        private static int GetSlotCount(Item item)
+        internal static int GetSlotCount(Item item)
         {
             try
             {

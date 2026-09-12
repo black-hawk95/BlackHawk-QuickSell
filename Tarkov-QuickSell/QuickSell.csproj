@@ -6,7 +6,7 @@
     <AssemblyName>QuickSell</AssemblyName>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyVersion>3.3.0</AssemblyVersion>
+    <AssemblyVersion>3.5.4</AssemblyVersion>
     <FileVersion>$(AssemblyVersion)</FileVersion>
     <Version>$(AssemblyVersion)</Version>
     <Deterministic>true</Deterministic>
@@ -122,7 +122,8 @@
     Copy the built plugin into BepInEx\plugins\QuickSell\. The folder is created first:
     the original project used a bare `copy` that silently failed if the folder was missing.
   -->
-  <Target Name="CopyToPlugins" AfterTargets="PostBuildEvent">
+  <Target Name="CopyToPlugins" AfterTargets="PostBuildEvent" Condition="'$(DeployOnBuild)' != 'false'">
+    <!-- Pass -p:DeployOnBuild=false for validation/CI builds without modifying a game install. -->
     <MakeDir Directories="$(SptPath)\BepInEx\plugins\QuickSell" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SptPath)\BepInEx\plugins\QuickSell\" SkipUnchangedFiles="true" />
   </Target>
