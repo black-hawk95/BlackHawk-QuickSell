@@ -35,7 +35,7 @@ When upgrading from v4.0.0, delete `BepInEx\plugins\QuickSell\QuickSell.TestFixe
 
 **The server component is optional but recommended.** Without it, flea prices are looked up one item at a time and are unavailable in raid. With it, the full price table loads once at startup and works everywhere.
 
-**Fika:** works on client and server. Detects headless clients and disables itself there.
+**Fika:** Install the client plugin on playing PCs only. **Do not install `QuickSell.dll` in `BepInEx\plugins` on the headless PC.** Install the server component in `SPT_Runtime\user\mods\QuickSell` on the SPT server. The client plugin also detects headless and disables itself if installed there by mistake.
 
 ## Configuration
 
