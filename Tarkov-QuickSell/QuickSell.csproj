@@ -6,7 +6,7 @@
     <AssemblyName>QuickSell</AssemblyName>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyVersion>3.3.0</AssemblyVersion>
+    <AssemblyVersion>4.0.0</AssemblyVersion>
     <FileVersion>$(AssemblyVersion)</FileVersion>
     <Version>$(AssemblyVersion)</Version>
     <Deterministic>true</Deterministic>
