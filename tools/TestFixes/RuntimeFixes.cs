@@ -19,6 +19,7 @@ namespace QuickSell.TestFixes
         private static MethodInfo _getAllItemsMethod;
         private static bool _getAllItemsResolved;
         private static MethodInfo _fleaTryGetMethod;
+        private static readonly Dictionary<string, string> TooltipItemTrees = new Dictionary<string, string>();
 
         public static void Initialize(object plugin)
         {
@@ -190,6 +191,48 @@ namespace QuickSell.TestFixes
             {
                 return false;
             }
+        }
+
+        public static void InvalidateTooltipIfContentsChanged()
+        {
+            try
+            {
+                var uiType = FindType("EFT.UI.ItemUiContext");
+                var ui = uiType == null ? null : FindProperty(uiType, "Instance", true)?.GetValue(null);
+                if (ui == null && uiType != null)
+                    ui = FindField(uiType, "Instance", true)?.GetValue(null);
+                var item = GetMemberValue(GetMemberValue(ui, "CurrentItemContext"), "Item");
+                var id = GetMemberValue(item, "Id")?.ToString();
+                if (string.IsNullOrEmpty(id)) return;
+
+                // A tooltip is cached by root ID. Its attachments can change while that
+                // root ID stays the same, so include every child ID and stack count.
+                var tree = string.Join("|", EnumerateItemTree(item).Select(node =>
+                    GetMemberValue(node, "Id") + ":" +
+                    GetMemberValue(node, "TemplateId") + ":" +
+                    GetMemberValue(node, "StackObjectsCount")));
+
+                if (TooltipItemTrees.TryGetValue(id, out var previous))
+                {
+                    if (previous == tree) return;
+
+                    var tooltipType = QuickSellAssembly?.GetType("QuickSell.Patches.TooltipPatch", false);
+                    var resultCache = tooltipType == null ? null :
+                        FindField(tooltipType, "ResultCache", true)?.GetValue(null) as IDictionary;
+                    resultCache?.Remove(id);
+                }
+
+                if (TooltipItemTrees.Count >= 4000)
+                {
+                    TooltipItemTrees.Clear();
+                    var tooltipType = QuickSellAssembly?.GetType("QuickSell.Patches.TooltipPatch", false);
+                    tooltipType?.GetMethod("Invalidate", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                        ?.Invoke(null, null);
+                }
+
+                TooltipItemTrees[id] = tree;
+            }
+            catch { /* A tooltip must still open even if cache invalidation fails. */ }
         }
 
         public static object[] GetBestTraderOffer(object item, object session)
