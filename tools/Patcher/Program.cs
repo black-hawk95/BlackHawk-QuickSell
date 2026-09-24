@@ -34,9 +34,11 @@ internal static class Program
         PatchSoundGate(module, ImportHelper("PlaySellSoundPerItem"));
         PatchFleaSaleToggle(module, ImportHelper("AllowFleaSales"), ImportHelper("ShouldShowFleaEntry"));
         PatchRefreshHotkey(module, ImportHelper("TryRefreshFleaPricesHotkey"));
-        // Trader.GetUserItemPrice(item) prices the item that ConfirmSell submits. Pricing
-        // detached component clones instead overquotes incomplete weapons and disagrees
-        // with the confirmation/transaction (e.g. an M4 quoted at 35.9k vs 10.3k).
+        // Sell the assembled root as one item, but quote the components it contains.
+        // The tooltip cache is invalidated when children change, so a stripped gun
+        // cannot keep the earlier assembled-gun quote.
+        PatchTraderOffer(module, ImportHelper("GetBestTraderOffer"));
+        PatchGlobalFleaBlockInstaller(module, ImportHelper("EnsureGlobalFleaBlockInstalled"));
         PatchFleaComposite(module, "QuickSell.Patches.ContextMenuPatch", "ShowFleaConfirmation", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: false);
         PatchFleaComposite(module, "QuickSell.Patches.TooltipPatch", "BuildPriceLines", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: true);
 
@@ -169,6 +171,24 @@ internal static class Program
         il.InsertBefore(first, il.Create(OpCodes.Ret));
         postfix.Body.MaxStackSize = Math.Max(postfix.Body.MaxStackSize, 1);
         Console.WriteLine("Patched configurable refresh flea prices hotkey.");
+    }
+
+    private static void PatchGlobalFleaBlockInstaller(ModuleDefinition module, MethodReference install)
+    {
+        var plugin = FindType(module, "QuickSell.Plugin");
+        if (plugin.Methods.Any(m => m.Name == "Update" && !m.HasParameters))
+            throw new InvalidOperationException("Plugin.Update already exists; do not overwrite its behavior");
+
+        // Unity invokes Update on the BepInEx plugin after Awake. The installer does
+        // nothing once it has patched the live session's RagfairAddOffer method.
+        var update = new MethodDefinition("Update",
+            Mono.Cecil.MethodAttributes.Private | Mono.Cecil.MethodAttributes.HideBySig,
+            module.TypeSystem.Void);
+        plugin.Methods.Add(update);
+        var il = update.Body.GetILProcessor();
+        il.Append(il.Create(OpCodes.Call, install));
+        il.Append(il.Create(OpCodes.Ret));
+        Console.WriteLine("Installed global flea offer guard for the normal listing page.");
     }
 
     private static void PatchTraderOffer(ModuleDefinition module, MethodReference getBestOffer)
