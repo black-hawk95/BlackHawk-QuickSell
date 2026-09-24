@@ -32,7 +32,9 @@ internal static class Program
         PatchAwake(module, ImportHelper("Initialize"));
         PatchTooltipGuard(module, ImportHelper("ShouldSkipTooltip"));
         PatchSoundGate(module, ImportHelper("PlaySellSoundPerItem"));
-        PatchTraderOffer(module, ImportHelper("GetBestTraderOffer"));
+        // Trader.GetUserItemPrice(item) prices the item that ConfirmSell submits. Pricing
+        // detached component clones instead overquotes incomplete weapons and disagrees
+        // with the confirmation/transaction (e.g. an M4 quoted at 35.9k vs 10.3k).
         PatchFleaComposite(module, "QuickSell.Patches.ContextMenuPatch", "ShowFleaConfirmation", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: false);
         PatchFleaComposite(module, "QuickSell.Patches.TooltipPatch", "BuildPriceLines", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: true);
 
@@ -234,7 +236,38 @@ internal static class Program
         il.InsertBefore(successPoint, il.Create(OpCodes.Stloc, priceVar));
 
         method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 3);
+        ExpandShortBranches(method);
         Console.WriteLine($"Patched composite flea pricing in {typeName}.{methodName}.");
+    }
+
+    private static void ExpandShortBranches(MethodDefinition method)
+    {
+        // Cecil retains short-branch opcodes when instructions are inserted. Their signed
+        // one-byte offsets can overflow after the composite-price call is added, leaving
+        // invalid IL that the runtime rejects before ShowFleaConfirmation can execute.
+        var longBranches = new Dictionary<Code, OpCode>
+        {
+            [Code.Br_S] = OpCodes.Br,
+            [Code.Brfalse_S] = OpCodes.Brfalse,
+            [Code.Brtrue_S] = OpCodes.Brtrue,
+            [Code.Beq_S] = OpCodes.Beq,
+            [Code.Bge_S] = OpCodes.Bge,
+            [Code.Bge_Un_S] = OpCodes.Bge_Un,
+            [Code.Bgt_S] = OpCodes.Bgt,
+            [Code.Bgt_Un_S] = OpCodes.Bgt_Un,
+            [Code.Ble_S] = OpCodes.Ble,
+            [Code.Ble_Un_S] = OpCodes.Ble_Un,
+            [Code.Blt_S] = OpCodes.Blt,
+            [Code.Blt_Un_S] = OpCodes.Blt_Un,
+            [Code.Bne_Un_S] = OpCodes.Bne_Un,
+            [Code.Leave_S] = OpCodes.Leave
+        };
+
+        foreach (var instruction in method.Body.Instructions)
+        {
+            if (longBranches.TryGetValue(instruction.OpCode.Code, out var longBranch))
+                instruction.OpCode = longBranch;
+        }
     }
 
     private static Instruction? FindCandidateLoad(Instruction call)
