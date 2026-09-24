@@ -18,7 +18,7 @@ Sell stash items fast — to whichever trader pays most, or straight onto the fl
 - **Price tooltips:** best trader price and flea price on hover, colour-coded by value
 - **Multi-select:** with UI Fixes installed, sell many items in one confirmation
 
-Traders are picked automatically by best offer. Flea listings use the average market price.
+Traders are picked automatically by best offer, including attached parts. Flea listings use the average market price.
 
 ## Installation
 
@@ -40,6 +40,9 @@ Traders are picked automatically by best offer. Flea listings use the average ma
 Settings are in the **F12 menu** under QuickSell, in three sections:
 
 - **1. Selling** — which context menu entries to show, confirmation dialog, flea listing price, trader blacklist, keybinds
+- **Allow flea market selling** in F12 blocks both QuickSell flea sales and normal flea listings when disabled. Flea buying remains available.
+- **Refresh flea prices** in F12 updates cached flea prices; an optional hotkey can trigger the same refresh. Trader prices are calculated from the current item and its attachments.
+- **Play sell sound for each item** controls the sound when selling multiple items.
 - **2. Tooltips** — which prices to show, whether to show them in raid, tooltip delay, colour coding
 - **3. Colors** — points to the config file
 
@@ -55,7 +58,7 @@ Delete `BepInEx\plugins\QuickSell\` and `SPT_Runtime\user\mods\QuickSell\`. Noth
 
 ## Network activity
 
-The client fetches the flea price table **once at startup** from your own local SPT server (`/quicksell/getFleaPrices`). No external servers, no telemetry, no data collection. Nothing is fetched during a raid.
+The client fetches the flea price table at startup and when you request a refresh from your own local SPT server (`/quicksell/getFleaPrices`). No external servers, no telemetry, no data collection. Nothing is fetched during a raid.
 
 ---
 
@@ -68,7 +71,7 @@ Built so that a raid costs effectively nothing.
 - **Keybinds check the key first.** `ItemUiContext.Update` runs every frame; the keybind test used to be the last thing in it, so every frame paid for reflection, LINQ and a `GetComponent` before discovering no key was pressed. Now it is two field reads and a return.
 - **No per-frame allocation.** The reflection cache was keyed on an interpolated string (an allocation every frame) and UI Fixes' `Count` was a reflection invoke (an array plus a boxed int per call). Both are now allocation-free.
 - **Trader assortments load lazily.** The original hooked the `Trader` constructor and force-refreshed every trader at startup, holding all of it for the session. Now nothing loads until a sale or price lookup needs it.
-- **Tooltips are cached per item.** Building the price lines costs a few milliseconds, mostly in asking every trader what it would pay. An item's price does not change while it sits in the stash, so it is worked out once.
+- **Tooltips are cached per item.** Building the price lines costs a few milliseconds, mostly in asking every trader what it would pay. Changing attachments or stack counts invalidates the cached price.
 - **Bulk selling prices each item once.** It used to find the best trader once to build the confirmation total and again to perform the sale: 30 items meant 60 full trader sweeps.
 - **Flea prices are fetched per template, not per item.** Selling 20 identical items fired 20 identical requests.
 

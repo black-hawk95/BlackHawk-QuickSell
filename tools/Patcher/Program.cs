@@ -9,9 +9,9 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        if (args.Length != 2)
+        if (args.Length != 2 && args.Length != 4)
         {
-            Console.Error.WriteLine("Usage: Patcher <QuickSell.dll> <QuickSell.TestFixes.dll>");
+            Console.Error.WriteLine("Usage: Patcher <QuickSell.dll> <QuickSell.TestFixes.dll> [<Server.dll> <version>]");
             return 2;
         }
 
@@ -42,16 +42,63 @@ internal static class Program
         PatchFleaComposite(module, "QuickSell.Patches.ContextMenuPatch", "ShowFleaConfirmation", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: false);
         PatchFleaComposite(module, "QuickSell.Patches.TooltipPatch", "BuildPriceLines", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: true);
 
+        if (args.Length == 4)
+            SetClientVersion(quick, args[3]);
+
         var temp = quickSellPath + ".patched";
         quick.Write(temp);
         quick.Dispose();
         helper.Dispose();
+
+        if (args.Length == 4)
+            SetServerVersion(Path.GetFullPath(args[2]), args[3]);
 
         File.Copy(temp, quickSellPath, true);
         File.Delete(temp);
 
         Console.WriteLine("Patched QuickSell.dll successfully.");
         return 0;
+    }
+
+    private static void SetClientVersion(AssemblyDefinition assembly, string version)
+    {
+        var plugin = FindType(assembly.MainModule, "QuickSell.Plugin");
+        var attribute = plugin.CustomAttributes.Single(a => a.AttributeType.FullName == "BepInEx.BepInPlugin");
+        attribute.ConstructorArguments[2] = new CustomAttributeArgument(assembly.MainModule.TypeSystem.String, version);
+        SetAssemblyVersion(assembly, version);
+        Console.WriteLine($"Updated client plugin and assembly version to {version}.");
+    }
+
+    private static void SetServerVersion(string path, string version)
+    {
+        using var assembly = AssemblyDefinition.ReadAssembly(path);
+        var metadata = FindType(assembly.MainModule, "BlackHawk.QuickSell.Server.ModMetadata");
+        var constructors = metadata.Methods.Where(m => m.IsConstructor && !m.IsStatic).ToList();
+        var values = constructors.SelectMany(m => m.Body.Instructions)
+            .Where(i => i.OpCode == OpCodes.Ldstr && (string)i.Operand == "3.4.0")
+            .ToList();
+        if (values.Count != 1)
+            throw new InvalidOperationException($"Expected one server metadata version; found {values.Count}");
+        values[0].Operand = version;
+        SetAssemblyVersion(assembly, version);
+        var temp = path + ".patched";
+        assembly.Write(temp);
+        File.Copy(temp, path, true);
+        File.Delete(temp);
+        Console.WriteLine($"Updated server mod and assembly version to {version}.");
+    }
+
+    private static void SetAssemblyVersion(AssemblyDefinition assembly, string version)
+    {
+        assembly.Name.Version = new Version(version);
+        foreach (var attribute in assembly.CustomAttributes)
+        {
+            if (attribute.AttributeType.FullName is not
+                ("System.Reflection.AssemblyFileVersionAttribute" or "System.Reflection.AssemblyInformationalVersionAttribute"))
+                continue;
+            attribute.ConstructorArguments[0] = new CustomAttributeArgument(
+                assembly.MainModule.TypeSystem.String, version);
+        }
     }
 
     private static TypeDefinition FindType(ModuleDefinition module, string fullName)

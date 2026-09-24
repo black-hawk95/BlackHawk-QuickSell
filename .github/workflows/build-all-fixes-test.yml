@@ -47,15 +47,16 @@ jobs:
         shell: bash
         run: |
           QUICKSELL_DLL="$(find package -type f -name QuickSell.dll -print -quit)"
-          if [ -z "$QUICKSELL_DLL" ]; then
-            echo "QuickSell.dll not found in release package"
+          SERVER_DLL="$(find package -type f -name BlackHawk.QuickSell.Server.dll -print -quit)"
+          if [ -z "$QUICKSELL_DLL" ] || [ -z "$SERVER_DLL" ]; then
+            echo "QuickSell client or server DLL not found in release package"
             exit 1
           fi
 
           HELPER_DLL="tools/TestFixes/bin/Release/netstandard2.1/QuickSell.TestFixes.dll"
           PATCHER_DLL="tools/Patcher/bin/Release/net8.0/Patcher.dll"
 
-          dotnet "$PATCHER_DLL" "$QUICKSELL_DLL" "$HELPER_DLL"
+          dotnet "$PATCHER_DLL" "$QUICKSELL_DLL" "$HELPER_DLL" "$SERVER_DLL" 4.0.0
           cp "$HELPER_DLL" "$(dirname "$QUICKSELL_DLL")/QuickSell.TestFixes.dll"
 
           cat > package/TEST-BUILD.txt <<'EOF'
