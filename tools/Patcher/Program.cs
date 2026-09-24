@@ -28,11 +28,11 @@ internal static class Program
         var helper = AssemblyDefinition.ReadAssembly(helperPath);
         var module = quick.MainModule;
 
-        var helperType = helper.MainModule.Types.First(t => t.FullName == "QuickSell.TestFixes.RuntimeFixes");
+        var helperType = HelperInliner.Copy(helper.MainModule, module);
         MethodReference ImportHelper(string name)
         {
             var method = helperType.Methods.Single(m => m.Name == name);
-            return module.ImportReference(method);
+            return method;
         }
 
         PatchAwake(module, ImportHelper("Initialize"));

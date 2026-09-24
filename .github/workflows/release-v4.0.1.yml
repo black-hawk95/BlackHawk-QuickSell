@@ -27,7 +27,6 @@ jobs:
         run: |
           dotnet build tools/TestFixes/QuickSell.TestFixes.csproj -c Release
           dotnet build tools/Patcher/Patcher.csproj -c Release
-          dotnet tool install dotnet-ilrepack --tool-path tools-bin --version 2.0.44
 
       - name: Download original game package
         env:
@@ -48,8 +47,6 @@ jobs:
           HELPER="tools/TestFixes/bin/Release/netstandard2.1/QuickSell.TestFixes.dll"
           PATCHER="tools/Patcher/bin/Release/net8.0/Patcher.dll"
           dotnet "$PATCHER" "$CLIENT" "$HELPER" "$SERVER" 4.0.1
-          tools-bin/ilrepack "/out:$(dirname "$CLIENT")/QuickSell.merged.dll" "$CLIENT" "$HELPER"
-          mv "$(dirname "$CLIENT")/QuickSell.merged.dll" "$CLIENT"
           dotnet "$PATCHER" --verify "$CLIENT" 4.0.1
           test "$(find "$(dirname "$CLIENT")" -maxdepth 1 -name '*.dll' | wc -l)" -eq 1
           test -f "$(dirname "$CLIENT")/config.json"

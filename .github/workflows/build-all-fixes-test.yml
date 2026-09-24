@@ -33,9 +33,6 @@ jobs:
       - name: Build binary patcher
         run: dotnet build tools/Patcher/Patcher.csproj -c Release
 
-      - name: Install assembly merger
-        run: dotnet tool install dotnet-ilrepack --tool-path tools-bin --version 2.0.44
-
       - name: Download current QuickSell package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,8 +58,6 @@ jobs:
           PATCHER_DLL="tools/Patcher/bin/Release/net8.0/Patcher.dll"
 
           dotnet "$PATCHER_DLL" "$QUICKSELL_DLL" "$HELPER_DLL" "$SERVER_DLL" 4.0.1
-          tools-bin/ilrepack "/out:$(dirname "$QUICKSELL_DLL")/QuickSell.merged.dll" "$QUICKSELL_DLL" "$HELPER_DLL"
-          mv "$(dirname "$QUICKSELL_DLL")/QuickSell.merged.dll" "$QUICKSELL_DLL"
           dotnet "$PATCHER_DLL" --verify "$QUICKSELL_DLL" 4.0.1
           test "$(find "$(dirname "$QUICKSELL_DLL")" -maxdepth 1 -name '*.dll' | wc -l)" -eq 1
 
