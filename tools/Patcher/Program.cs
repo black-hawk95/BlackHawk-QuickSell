@@ -9,9 +9,15 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--verify")
+        {
+            VerifySingleClientAssembly(Path.GetFullPath(args[1]), args[2]);
+            return 0;
+        }
+
         if (args.Length != 2 && args.Length != 4)
         {
-            Console.Error.WriteLine("Usage: Patcher <QuickSell.dll> <QuickSell.TestFixes.dll> [<Server.dll> <version>]");
+            Console.Error.WriteLine("Usage: Patcher <QuickSell.dll> <QuickSell.TestFixes.dll> [<Server.dll> <version>] | --verify <QuickSell.dll> <version>");
             return 2;
         }
 
@@ -22,11 +28,11 @@ internal static class Program
         var helper = AssemblyDefinition.ReadAssembly(helperPath);
         var module = quick.MainModule;
 
-        var helperType = helper.MainModule.Types.First(t => t.FullName == "QuickSell.TestFixes.RuntimeFixes");
+        var helperType = HelperInliner.Copy(helper.MainModule, module);
         MethodReference ImportHelper(string name)
         {
             var method = helperType.Methods.Single(m => m.Name == name);
-            return module.ImportReference(method);
+            return method;
         }
 
         PatchAwake(module, ImportHelper("Initialize"));
@@ -58,6 +64,22 @@ internal static class Program
 
         Console.WriteLine("Patched QuickSell.dll successfully.");
         return 0;
+    }
+
+    private static void VerifySingleClientAssembly(string path, string version)
+    {
+        using var assembly = AssemblyDefinition.ReadAssembly(path);
+        var module = assembly.MainModule;
+        FindType(module, "QuickSell.TestFixes.RuntimeFixes");
+        if (module.AssemblyReferences.Any(r => r.Name == "QuickSell.TestFixes"))
+            throw new InvalidOperationException("The client still depends on QuickSell.TestFixes.dll");
+        var plugin = FindType(module, "QuickSell.Plugin");
+        var attribute = plugin.CustomAttributes.Single(a => a.AttributeType.FullName == "BepInEx.BepInPlugin");
+        if ((string)attribute.ConstructorArguments[2].Value != version ||
+            assembly.Name.Version.ToString(3) != version)
+            throw new InvalidOperationException("The merged client version does not match the release");
+
+        Console.WriteLine($"Verified QuickSell.dll contains RuntimeFixes with no helper DLL reference (v{version}).");
     }
 
     private static void SetClientVersion(AssemblyDefinition assembly, string version)

@@ -27,6 +27,8 @@ Traders are picked automatically by best offer, including attached parts. Flea l
 3. Server files land in `SPT_Runtime\user\mods\QuickSell\`
 4. Start SPT
 
+When upgrading from v4.0.0, delete `BepInEx\plugins\QuickSell\QuickSell.TestFixes.dll` before extracting the new ZIP. All client code is now inside `QuickSell.dll`.
+
 **Requires SPT 4.1.3** (EFT `0.16.9.5.40743`). Will not work on 4.0.x.
 
 **Optional:** [UI Fixes](https://sp-mod.com/mods) 6.0.0+ for multi-select selling.

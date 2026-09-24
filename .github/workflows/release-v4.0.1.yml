@@ -1,0 +1,67 @@
+name: Publish QuickSell v4.0.1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/release-v4.0.1.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build tools
+        run: |
+          dotnet build tools/TestFixes/QuickSell.TestFixes.csproj -c Release
+          dotnet build tools/Patcher/Patcher.csproj -c Release
+
+      - name: Download original game package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p work package
+          gh release download v3.4.0 \
+            --repo black-hawk95/BlackHawk-QuickSell \
+            --pattern "QuickSell.spt.4.1.port.v3.4.0.zip" \
+            --dir work
+          unzip -q work/QuickSell.spt.4.1.port.v3.4.0.zip -d package
+
+      - name: Build single-DLL v4.0.1 package
+        run: |
+          CLIENT="$(find package -type f -name QuickSell.dll -print -quit)"
+          SERVER="$(find package -type f -name BlackHawk.QuickSell.Server.dll -print -quit)"
+          test -n "$CLIENT" && test -n "$SERVER"
+          HELPER="tools/TestFixes/bin/Release/netstandard2.1/QuickSell.TestFixes.dll"
+          PATCHER="tools/Patcher/bin/Release/net8.0/Patcher.dll"
+          dotnet "$PATCHER" "$CLIENT" "$HELPER" "$SERVER" 4.0.1
+          dotnet "$PATCHER" --verify "$CLIENT" 4.0.1
+          test "$(find "$(dirname "$CLIENT")" -maxdepth 1 -name '*.dll' | wc -l)" -eq 1
+          test -f "$(dirname "$CLIENT")/config.json"
+          cd package
+          zip -qr ../QuickSell.spt.4.1.port.v4.0.1.zip .
+          cd ..
+          unzip -t QuickSell.spt.4.1.port.v4.0.1.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v4.0.1 QuickSell.spt.4.1.port.v4.0.1.zip \
+            --repo black-hawk95/BlackHawk-QuickSell \
+            --target "$GITHUB_SHA" \
+            --title "QuickSell v4.0.1" \
+            --notes-file docs/changelog/v4.0.1.md \
+            --latest
