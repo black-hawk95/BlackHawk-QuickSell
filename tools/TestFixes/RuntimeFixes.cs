@@ -16,6 +16,8 @@ namespace QuickSell.TestFixes
         private static Assembly _quickSellAssembly;
         private static Assembly _gameAssembly;
         private static MethodInfo _cloneItemMethod;
+        private static MethodInfo _getAllItemsMethod;
+        private static bool _getAllItemsResolved;
         private static MethodInfo _fleaTryGetMethod;
 
         public static void Initialize(object plugin)
@@ -421,6 +423,49 @@ namespace QuickSell.TestFixes
         {
             var result = new List<object>();
             if (root == null) return result;
+
+            // The game exposes the complete item tree directly. Walking a guessed
+            // "Containers" property missed weapon slots in the previous test build,
+            // leaving flea prices unchanged when the sight, magazine or suppressor
+            // was removed. Use the game's tree enumeration first.
+            try
+            {
+                if (!_getAllItemsResolved)
+                {
+                    _getAllItemsResolved = true;
+                    _getAllItemsMethod = root.GetType().GetMethod("GetAllItems",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null, Type.EmptyTypes, null);
+
+                    // Some EFT builds expose GetAllItems as an extension method.
+                    if (_getAllItemsMethod == null)
+                    {
+                        _getAllItemsMethod = GetLoadableTypes(GameAssembly)
+                            .SelectMany(t => t.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+                            .FirstOrDefault(m => m.Name == "GetAllItems" &&
+                                m.GetParameters().Length == 1 &&
+                                m.GetParameters()[0].ParameterType.IsAssignableFrom(root.GetType()) &&
+                                typeof(IEnumerable).IsAssignableFrom(m.ReturnType));
+                    }
+                }
+
+                var allItems = _getAllItemsMethod == null ? null :
+                    (_getAllItemsMethod.IsStatic
+                        ? _getAllItemsMethod.Invoke(null, new[] { root })
+                        : _getAllItemsMethod.Invoke(root, null)) as IEnumerable;
+
+                if (allItems != null)
+                {
+                    var seenItems = new HashSet<object>(ReferenceComparer.Instance);
+                    result.Add(root);
+                    seenItems.Add(root);
+                    foreach (var item in allItems)
+                        if (item != null && seenItems.Add(item)) result.Add(item);
+                    if (result.Count > 1) return result;
+                    result.Clear();
+                }
+            }
+            catch { result.Clear(); }
 
             var seen = new HashSet<object>(ReferenceComparer.Instance);
             var stack = new Stack<object>();
