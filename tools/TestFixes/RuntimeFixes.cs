@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
@@ -10,6 +11,8 @@ namespace QuickSell.TestFixes
     public static class RuntimeFixes
     {
         private static object _playPerItemEntry;
+        private static object _allowFleaSalesEntry;
+        private static Func<bool> _refreshHotkeyIsDown;
         private static Assembly _quickSellAssembly;
         private static Assembly _gameAssembly;
         private static MethodInfo _cloneItemMethod;
@@ -48,11 +51,101 @@ namespace QuickSell.TestFixes
                         false,
                         "Off = play the trade-complete sound once for the whole batch. On = play it once for every item that sells successfully."
                     });
+
+                try
+                {
+                    _allowFleaSalesEntry = bind.MakeGenericMethod(typeof(bool)).Invoke(
+                        config,
+                        new object[]
+                        {
+                            "1. Selling",
+                            "Allow QuickSell flea sales",
+                            true,
+                            "Off blocks QuickSell flea sales from both the right-click menu and the flea keybind. The normal game's flea market remains available."
+                        });
+                }
+                catch { _allowFleaSalesEntry = null; }
+
+                try
+                {
+                    var shortcutType = FindType("BepInEx.Configuration.KeyboardShortcut");
+                    var keyType = FindType("UnityEngine.KeyCode");
+                    if (shortcutType != null && keyType != null)
+                    {
+                        var none = Enum.Parse(keyType, "None");
+                        var ctor = shortcutType.GetConstructor(new[] { keyType, keyType.MakeArrayType() });
+                        var unassigned = ctor?.Invoke(new[] { none, Array.CreateInstance(keyType, 0) });
+                        if (unassigned != null)
+                        {
+                            var entry = bind.MakeGenericMethod(shortcutType).Invoke(
+                                config,
+                                new object[]
+                                {
+                                    "2. Tooltips",
+                                    "Refresh flea prices (key)",
+                                    unassigned,
+                                    "Optional hotkey for Refresh flea prices now. Works in the menu, not during a raid or while typing. Unassigned by default."
+                                });
+
+                            // Compile the value getter and IsDown call once. The inventory UI
+                            // checks this every frame, so reflection must stay off the hot path.
+                            var value = Expression.Property(Expression.Constant(entry), "Value");
+                            var isDown = shortcutType.GetMethod("IsDown", Type.EmptyTypes);
+                            if (isDown != null)
+                                _refreshHotkeyIsDown = Expression.Lambda<Func<bool>>(
+                                    Expression.Call(value, isDown)).Compile();
+                        }
+                    }
+                }
+                catch { _refreshHotkeyIsDown = null; }
             }
             catch
             {
                 _playPerItemEntry = null;
             }
+        }
+
+        public static bool AllowFleaSales()
+        {
+            try
+            {
+                if (_allowFleaSalesEntry == null) return true;
+                var value = FindProperty(_allowFleaSalesEntry.GetType(), "Value", true)?.GetValue(_allowFleaSalesEntry);
+                return value is bool b ? b : true;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        public static bool ShouldShowFleaEntry(bool originalSetting)
+            => originalSetting && AllowFleaSales();
+
+        public static bool TryRefreshFleaPricesHotkey()
+        {
+            try
+            {
+                if (_refreshHotkeyIsDown == null || !_refreshHotkeyIsDown()) return false;
+
+                var environment = QuickSellAssembly?.GetType("QuickSell.Patches.ModEnvironment", false);
+                if (FindProperty(environment, "IsInRaid", true)?.GetValue(null) is bool inRaid && inRaid)
+                    return false;
+
+                var keybinds = QuickSellAssembly?.GetType("QuickSell.Patches.KeybindPatches", false);
+                var textbox = keybinds?.GetMethod("TextboxActive", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (textbox?.Invoke(null, null) is bool typing && typing) return false;
+
+                var tooltip = QuickSellAssembly?.GetType("QuickSell.Patches.TooltipPatch", false);
+                tooltip?.GetMethod("Invalidate", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.Invoke(null, null);
+
+                var client = QuickSellAssembly?.GetType("QuickSell.Patches.FleaPriceClient", false);
+                client?.GetMethod("ForceRefresh", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.Invoke(null, null);
+                return true;
+            }
+            catch { return false; }
         }
 
         public static bool PlaySellSoundPerItem()
