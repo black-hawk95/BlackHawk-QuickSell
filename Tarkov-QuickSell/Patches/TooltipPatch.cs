@@ -84,7 +84,10 @@ namespace QuickSell.Patches
                 // raid: one boolean pair, no allocation.
                 if (ModEnvironment.IsInRaid && !Plugin.ShowPricesInRaid) return;
 
-                var item = ItemUiContext.Instance?.CurrentItemContext?.Item;
+                var itemContext = ItemUiContext.Instance?.CurrentItemContext;
+                if (itemContext == null || itemContext.ViewType == EItemViewType.TradingTrader) return;
+
+                var item = itemContext.Item;
                 if (item == null) return;
 
                 var id = item.Id.ToString();
@@ -111,9 +114,14 @@ namespace QuickSell.Patches
 
                 if (!string.IsNullOrEmpty(suffix)) text += suffix;
             }
+            catch (OverflowException)
+            {
+                // Trader-owned stacks can use sentinel-sized counts that overflow EFT's Int32
+                // trader-price calculation. In that case leave the game's tooltip untouched.
+            }
             catch (Exception ex)
             {
-                // A tooltip must never take the UI down with it.
+                // Unexpected tooltip failures are still useful diagnostics, but must never break UI.
                 Plugin.LogSource?.LogWarning($"QuickSell: tooltip failed: {ex.Message}");
             }
         }
