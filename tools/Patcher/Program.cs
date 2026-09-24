@@ -32,6 +32,8 @@ internal static class Program
         PatchAwake(module, ImportHelper("Initialize"));
         PatchTooltipGuard(module, ImportHelper("ShouldSkipTooltip"));
         PatchSoundGate(module, ImportHelper("PlaySellSoundPerItem"));
+        PatchFleaSaleToggle(module, ImportHelper("AllowFleaSales"), ImportHelper("ShouldShowFleaEntry"));
+        PatchRefreshHotkey(module, ImportHelper("TryRefreshFleaPricesHotkey"));
         // Trader.GetUserItemPrice(item) prices the item that ConfirmSell submits. Pricing
         // detached component clones instead overquotes incomplete weapons and disagrees
         // with the confirmation/transaction (e.g. an M4 quoted at 35.9k vs 10.3k).
@@ -122,6 +124,49 @@ internal static class Program
         il.InsertBefore(first, il.Create(OpCodes.Stfld, played));
         method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 2);
         Console.WriteLine("Patched per-item sell sound toggle.");
+    }
+
+    private static void PatchFleaSaleToggle(ModuleDefinition module, MethodReference allowed, MethodReference showEntry)
+    {
+        // Keep the existing "Flea market entry" menu-only setting. The additional switch
+        // gates both that entry and every direct sale path (including the N keybind).
+        var plugin = FindType(module, "QuickSell.Plugin");
+        var getter = plugin.Methods.Single(m => m.Name == "get_EnableQuickSellFlea");
+        var getterIl = getter.Body.GetILProcessor();
+        foreach (var ret in getter.Body.Instructions.Where(i => i.OpCode == OpCodes.Ret).ToList())
+            getterIl.InsertBefore(ret, getterIl.Create(OpCodes.Call, showEntry));
+
+        var context = FindType(module, "QuickSell.Patches.ContextMenuPatch");
+        var sale = context.Methods.Single(m => m.Name == "SellToFlea" && m.Parameters.Count == 1);
+        var submit = context.Methods.Single(m => m.Name == "DoFleaOffer");
+        foreach (var method in new[] { sale, submit })
+        {
+            var il = method.Body.GetILProcessor();
+            var first = method.Body.Instructions.First();
+            il.InsertBefore(first, il.Create(OpCodes.Call, allowed));
+            il.InsertBefore(first, il.Create(OpCodes.Brtrue, first));
+            il.InsertBefore(first, il.Create(OpCodes.Ret));
+            method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 1);
+        }
+
+        getter.Body.MaxStackSize = Math.Max(getter.Body.MaxStackSize, 2);
+        Console.WriteLine("Patched F12 toggle to block QuickSell flea menu and keybind sales.");
+    }
+
+    private static void PatchRefreshHotkey(ModuleDefinition module, MethodReference refresh)
+    {
+        var keybindPatch = FindType(module, "ItemUiContextKeybindPatch");
+        var postfix = keybindPatch.Methods.Single(m => m.Name == "Postfix");
+        var il = postfix.Body.GetILProcessor();
+        var first = postfix.Body.Instructions.First();
+
+        // The helper checks its bound shortcut first. On a refresh keypress it also
+        // checks raid/text-entry state and invokes the same refresh as the F12 button.
+        il.InsertBefore(first, il.Create(OpCodes.Call, refresh));
+        il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
+        il.InsertBefore(first, il.Create(OpCodes.Ret));
+        postfix.Body.MaxStackSize = Math.Max(postfix.Body.MaxStackSize, 1);
+        Console.WriteLine("Patched configurable refresh flea prices hotkey.");
     }
 
     private static void PatchTraderOffer(ModuleDefinition module, MethodReference getBestOffer)
