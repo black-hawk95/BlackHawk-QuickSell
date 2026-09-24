@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - test/all-fixes-build
+      - fix/single-dll-v4
     paths:
       - ".github/workflows/build-all-fixes-test.yml"
       - "tools/TestFixes/**"
@@ -32,6 +33,9 @@ jobs:
       - name: Build binary patcher
         run: dotnet build tools/Patcher/Patcher.csproj -c Release
 
+      - name: Install assembly merger
+        run: dotnet tool install dotnet-ilrepack --tool-path tools-bin --version 2.0.44
+
       - name: Download current QuickSell package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,11 +60,14 @@ jobs:
           HELPER_DLL="tools/TestFixes/bin/Release/netstandard2.1/QuickSell.TestFixes.dll"
           PATCHER_DLL="tools/Patcher/bin/Release/net8.0/Patcher.dll"
 
-          dotnet "$PATCHER_DLL" "$QUICKSELL_DLL" "$HELPER_DLL" "$SERVER_DLL" 4.0.0
-          cp "$HELPER_DLL" "$(dirname "$QUICKSELL_DLL")/QuickSell.TestFixes.dll"
+          dotnet "$PATCHER_DLL" "$QUICKSELL_DLL" "$HELPER_DLL" "$SERVER_DLL" 4.0.1
+          tools-bin/ilrepack "/out:$(dirname "$QUICKSELL_DLL")/QuickSell.merged.dll" "$QUICKSELL_DLL" "$HELPER_DLL"
+          mv "$(dirname "$QUICKSELL_DLL")/QuickSell.merged.dll" "$QUICKSELL_DLL"
+          dotnet "$PATCHER_DLL" --verify "$QUICKSELL_DLL" 4.0.1
+          test "$(find "$(dirname "$QUICKSELL_DLL")" -maxdepth 1 -name '*.dll' | wc -l)" -eq 1
 
           cat > package/TEST-BUILD.txt <<'EOF'
-          QuickSell v3.4.0 - all fixes TEST BUILD
+          QuickSell v4.0.1 - single client DLL TEST BUILD
 
           Included test changes:
           - Suppress QuickSell price tooltip on trader-owned inventory items to avoid Int32 overflow console spam.
@@ -72,19 +79,19 @@ jobs:
           - Composite flea pricing uses the game's item tree to include nested attachments in sale confirmation and tooltips.
           - Flea confirmation uses long IL branches so the patched method can run.
 
-          This is a test build. It has not been merged into main.
+          This is a test build. It has not been merged into main. Remove the old QuickSell.TestFixes.dll when upgrading from v4.0.0.
           EOF
 
       - name: Package test build
         run: |
           cd package
-          zip -qr ../QuickSell-v3.4.0-test-global-flea-and-trader.zip .
+          zip -qr ../QuickSell-v4.0.1-single-dll-test.zip .
           cd ..
-          ls -lh QuickSell-v3.4.0-test-global-flea-and-trader.zip
+          ls -lh QuickSell-v4.0.1-single-dll-test.zip
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QuickSell-v3.4.0-test-global-flea-and-trader
-          path: QuickSell-v3.4.0-test-global-flea-and-trader.zip
+          name: QuickSell-v4.0.1-single-dll-test
+          path: QuickSell-v4.0.1-single-dll-test.zip
           if-no-files-found: error

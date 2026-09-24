@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace QuickSell
 {
-    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "4.0.0")]
+    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "4.0.1")]
     // UI Fixes 6.0 (SPT 4.1) changed its GUID from "Tyfon.UIFixes" to "com.tyfon.uifixes".
     // Both are declared so load order is correct against either version.
     // Only the current GUID is declared. The legacy "Tyfon.UIFixes" was kept for a while for
