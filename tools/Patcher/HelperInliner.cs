@@ -30,7 +30,7 @@ internal static class HelperInliner
             return target;
         }
 
-        foreach (var type in source.Types.Where(t => t.Name != "<Module>")) AddType(type);
+        AddType(source.Types.Single(t => t.FullName == "QuickSell.TestFixes.RuntimeFixes"));
 
         TypeReference Type(TypeReference reference)
         {
