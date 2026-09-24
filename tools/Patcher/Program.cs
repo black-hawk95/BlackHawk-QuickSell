@@ -30,7 +30,7 @@ internal static class Program
         }
 
         PatchAwake(module, ImportHelper("Initialize"));
-        PatchTooltipGuard(module, ImportHelper("ShouldSkipTooltip"));
+        PatchTooltipGuard(module, ImportHelper("ShouldSkipTooltip"), ImportHelper("InvalidateTooltipIfContentsChanged"));
         PatchSoundGate(module, ImportHelper("PlaySellSoundPerItem"));
         PatchFleaSaleToggle(module, ImportHelper("AllowFleaSales"), ImportHelper("ShouldShowFleaEntry"));
         PatchRefreshHotkey(module, ImportHelper("TryRefreshFleaPricesHotkey"));
@@ -92,18 +92,20 @@ internal static class Program
         Console.WriteLine("Patched F12 sound setting initialization.");
     }
 
-    private static void PatchTooltipGuard(ModuleDefinition module, MethodReference shouldSkip)
+    private static void PatchTooltipGuard(ModuleDefinition module, MethodReference shouldSkip, MethodReference invalidateChanged)
     {
         var type = FindType(module, "QuickSell.Patches.TooltipPatch");
         var method = type.Methods.Single(m => m.Name == "Prefix");
         var il = method.Body.GetILProcessor();
         var first = method.Body.Instructions.First();
+        var checkContents = il.Create(OpCodes.Call, invalidateChanged);
 
         il.InsertBefore(first, il.Create(OpCodes.Call, shouldSkip));
-        il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
+        il.InsertBefore(first, il.Create(OpCodes.Brfalse, checkContents));
         il.InsertBefore(first, il.Create(OpCodes.Ret));
+        il.InsertBefore(first, checkContents);
         method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 1);
-        Console.WriteLine("Patched trader-inventory tooltip suppression.");
+        Console.WriteLine("Patched trader-inventory tooltip suppression and changed-item cache invalidation.");
     }
 
     private static void PatchSoundGate(ModuleDefinition module, MethodReference playEach)
