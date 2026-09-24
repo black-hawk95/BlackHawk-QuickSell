@@ -37,6 +37,7 @@ namespace QuickSell
         private static ConfigEntry<bool> _enableQuickSellFlea;
         private static ConfigEntry<bool> _enableQuickSellTraders;
         private static ConfigEntry<bool> _showConfirmationDialog;
+        private static ConfigEntry<bool> _playSellSoundPerItem;
         private static ConfigEntry<bool> _ignoreFleaCapacity;
         private static ConfigEntry<bool> _sellFromContainers;
         private static ConfigEntry<bool> _sellFromSecureContainer;
@@ -51,6 +52,7 @@ namespace QuickSell
         public static bool EnableQuickSellFlea => _enableQuickSellFlea?.Value ?? true;
         public static bool EnableQuickSellTraders => _enableQuickSellTraders?.Value ?? true;
         public static bool ShowConfirmationDialog => _showConfirmationDialog?.Value ?? true;
+        public static bool PlaySellSoundPerItem => _playSellSoundPerItem?.Value ?? false;
         public static bool IgnoreFleaCapacity => _ignoreFleaCapacity?.Value ?? false;
         public static bool SellFromContainers => _sellFromContainers?.Value ?? true;
 
@@ -188,6 +190,13 @@ namespace QuickSell
                     "lose, selling cannot be undone, and with UI Fixes multi-select a mis-click " +
                     "takes several items at once.",
                     null, new ConfigurationManagerAttributes { Order = 89 }));
+
+            _playSellSoundPerItem = Config.Bind(SectionSelling, "Play sell sound for each item", false,
+                new ConfigDescription(
+                    "Controls the trade-complete sound when selling multiple items.\n\n" +
+                    "Off = play the sound once for the whole batch.\n" +
+                    "On = play the sound once for every item that sells successfully.",
+                    null, new ConfigurationManagerAttributes { Order = 88 }));
 
             _tradersBlacklist = Config.Bind(SectionSelling, "Never sell to", "",
                 new ConfigDescription(

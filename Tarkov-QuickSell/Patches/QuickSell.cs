@@ -195,8 +195,8 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
-                        // One gate shared by every item in this batch, so the confirmation sound
-                        // plays once for the whole sale instead of once per item.
+                        // One gate shared by every item in this batch. It normally plays the
+                        // completion sound once, or once per successful item when enabled in F12.
                         var soundGate = new SellSoundGate();
 
                         if (IsMultiSelectActive())
@@ -362,8 +362,8 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
-                        // One gate shared by every item in this batch, so the confirmation sound
-                        // plays once for the whole sale instead of once per item.
+                        // One gate shared by every item in this batch. It normally plays the
+                        // completion sound once, or once per successful item when enabled in F12.
                         var soundGate = new SellSoundGate();
 
                         if (IsMultiSelectActive())
@@ -420,10 +420,9 @@ namespace QuickSell.Patches
         // ------------------------------------------------------------------ shared
 
         /// <summary>
-        /// Shared by every sale in one QuickSell batch so the trade-complete sound plays once for
-        /// the whole operation instead of once per item. Each item's sale still gets its own
-        /// ConfirmSell/RagfairAddOffer callback (needed for correct game-state handling), but they
-        /// all report into the same gate, and only the first successful result triggers the sound.
+        /// Shared by every sale in one QuickSell batch. By default only the first successful sale
+        /// plays the trade-complete sound. The F12 option can restore the old behaviour and play
+        /// the sound once for every successfully sold item.
         /// </summary>
         private sealed class SellSoundGate
         {
@@ -431,7 +430,9 @@ namespace QuickSell.Patches
 
             public void OnResult(IResult result)
             {
-                if (_played || !result.Succeed) return;
+                if (!result.Succeed) return;
+                if (!Plugin.PlaySellSoundPerItem && _played) return;
+
                 _played = true;
                 Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.TradeOperationComplete);
             }
