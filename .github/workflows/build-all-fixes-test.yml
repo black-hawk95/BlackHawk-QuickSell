@@ -67,7 +67,7 @@ jobs:
           - F12 option: "Allow QuickSell flea sales" blocks both the menu entry and the flea keybind.
           - F12 option: "Refresh flea prices (key)" binds an optional menu-only hotkey to the existing refresh action.
           - Trader tooltip and confirmation use the game's sale price for the exact item.
-          - Composite flea pricing includes cached prices of nested attachments/items in sale confirmation and tooltips.
+          - Composite flea pricing uses the game's item tree to include nested attachments in sale confirmation and tooltips.
           - Flea confirmation uses long IL branches so the patched method can run.
 
           This is a test build. It has not been merged into main.
@@ -76,13 +76,13 @@ jobs:
       - name: Package test build
         run: |
           cd package
-          zip -qr ../QuickSell-v3.4.0-test-flea-controls.zip .
+          zip -qr ../QuickSell-v3.4.0-test-flea-controls-and-prices.zip .
           cd ..
-          ls -lh QuickSell-v3.4.0-test-flea-controls.zip
+          ls -lh QuickSell-v3.4.0-test-flea-controls-and-prices.zip
 
       - name: Upload test artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QuickSell-v3.4.0-test-flea-controls
-          path: QuickSell-v3.4.0-test-flea-controls.zip
+          name: QuickSell-v3.4.0-test-flea-controls-and-prices
+          path: QuickSell-v3.4.0-test-flea-controls-and-prices.zip
           if-no-files-found: error
