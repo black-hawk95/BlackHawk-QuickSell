@@ -20,6 +20,9 @@ namespace QuickSell.TestFixes
         private static bool _getAllItemsResolved;
         private static MethodInfo _fleaTryGetMethod;
         private static readonly Dictionary<string, string> TooltipItemTrees = new Dictionary<string, string>();
+        private static bool _globalFleaPatchInstalled;
+        private static bool _globalFleaPatchWarningLogged;
+        private static DateTime _nextFleaPatchAttempt;
 
         public static void Initialize(object plugin)
         {
@@ -62,9 +65,9 @@ namespace QuickSell.TestFixes
                         new object[]
                         {
                             "1. Selling",
-                            "Allow QuickSell flea sales",
+                            "Allow flea market selling",
                             true,
-                            "Off blocks QuickSell flea sales from both the right-click menu and the flea keybind. The normal game's flea market remains available."
+                            "Off blocks all new flea listings, including the normal flea market page, QuickSell right-click menu and flea keybind. Buying remains available."
                         });
                 }
                 catch { _allowFleaSalesEntry = null; }
@@ -124,6 +127,113 @@ namespace QuickSell.TestFixes
 
         public static bool ShouldShowFleaEntry(bool originalSetting)
             => originalSetting && AllowFleaSales();
+
+        public static void EnsureGlobalFleaBlockInstalled()
+        {
+            if (_globalFleaPatchInstalled || DateTime.UtcNow < _nextFleaPatchAttempt) return;
+            _nextFleaPatchAttempt = DateTime.UtcNow.AddSeconds(2);
+
+            try
+            {
+                var context = QuickSellAssembly?.GetType("QuickSell.Patches.ContextMenuPatch", false);
+                var getSession = context?.GetMethod("GetSession", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                var session = getSession?.Invoke(null, null);
+                if (session == null) return;
+
+                var harmonyType = FindType("HarmonyLib.Harmony");
+                var harmonyMethodType = FindType("HarmonyLib.HarmonyMethod");
+                if (harmonyType == null || harmonyMethodType == null) return;
+
+                var prefixMethod = typeof(RuntimeFixes).GetMethod(nameof(BlockGlobalFleaOfferPrefix));
+                var prefix = Activator.CreateInstance(harmonyMethodType, new object[] { prefixMethod });
+                var harmony = Activator.CreateInstance(harmonyType, new object[] { "com.blackhawk.quicksell.flea-offer-block" });
+                var patch = harmonyType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(m => m.Name == "Patch" && m.GetParameters().Length == 5 &&
+                        m.GetParameters()[0].ParameterType == typeof(MethodBase));
+                if (patch == null) return;
+
+                var targets = session.GetType()
+                    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Where(m => m.Name.EndsWith("RagfairAddOffer", StringComparison.OrdinalIgnoreCase) &&
+                        m.GetParameters().Any(p => typeof(Delegate).IsAssignableFrom(p.ParameterType)))
+                    .GroupBy(m => m.Module.ModuleVersionId + ":" + m.MetadataToken)
+                    .Select(group => group.First())
+                    .ToList();
+
+                foreach (var target in targets)
+                    patch.Invoke(harmony, new[] { target, prefix, null, null, null });
+
+                if (targets.Count > 0)
+                {
+                    _globalFleaPatchInstalled = true;
+                    LogQuickSellInfo("Global flea listing guard installed on " + targets.Count + " session method(s).");
+                }
+                else if (!_globalFleaPatchWarningLogged)
+                {
+                    _globalFleaPatchWarningLogged = true;
+                    LogQuickSellWarning("Could not find the game's RagfairAddOffer method; global flea blocking is unavailable.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogQuickSellWarning("Could not install global flea offer guard: " + ex.Message);
+            }
+        }
+
+        // The session method is shared by QuickSell and the normal flea listing page.
+        // Return a failed callback so the native screen can leave its waiting state.
+        public static bool BlockGlobalFleaOfferPrefix(object[] __args)
+        {
+            if (AllowFleaSales()) return true;
+
+            try
+            {
+                var callback = __args?.OfType<Delegate>().LastOrDefault();
+                var resultType = callback?.GetType().GetMethod("Invoke")?.GetParameters().FirstOrDefault()?.ParameterType;
+                if (resultType != null)
+                {
+                    var failureType = AppDomain.CurrentDomain.GetAssemblies()
+                        .SelectMany(GetLoadableTypes)
+                        .FirstOrDefault(t => t.Name == "FailedResult" && resultType.IsAssignableFrom(t));
+                    var failure = failureType?.GetConstructor(new[] { typeof(string), typeof(int) })
+                        ?.Invoke(new object[] { "Flea selling is disabled in F12", 0 });
+                    if (failure != null) callback.DynamicInvoke(failure);
+                    else LogQuickSellWarning("Flea offer blocked but a failed callback result was unavailable.");
+                }
+
+                var utils = QuickSellAssembly?.GetType("QuickSell.Patches.Utils", false);
+                utils?.GetMethod("SendError", BindingFlags.Static | BindingFlags.Public)
+                    ?.Invoke(null, new object[] { "Flea selling is disabled in F12" });
+            }
+            catch (Exception ex)
+            {
+                LogQuickSellWarning("Flea offer was blocked: " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private static void LogQuickSellWarning(string message)
+        {
+            try
+            {
+                var plugin = QuickSellAssembly?.GetType("QuickSell.Plugin", false);
+                var logger = plugin?.GetField("LogSource", BindingFlags.Static | BindingFlags.Public)?.GetValue(null);
+                logger?.GetType().GetMethod("LogWarning", new[] { typeof(object) })?.Invoke(logger, new object[] { message });
+            }
+            catch { }
+        }
+
+        private static void LogQuickSellInfo(string message)
+        {
+            try
+            {
+                var plugin = QuickSellAssembly?.GetType("QuickSell.Plugin", false);
+                var logger = plugin?.GetField("LogSource", BindingFlags.Static | BindingFlags.Public)?.GetValue(null);
+                logger?.GetType().GetMethod("LogInfo", new[] { typeof(object) })?.Invoke(logger, new object[] { message });
+            }
+            catch { }
+        }
 
         public static bool TryRefreshFleaPricesHotkey()
         {
