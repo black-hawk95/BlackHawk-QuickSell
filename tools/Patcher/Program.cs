@@ -71,18 +71,20 @@ internal static class Program
 
     private static void SetServerVersion(string path, string version)
     {
-        using var assembly = AssemblyDefinition.ReadAssembly(path);
-        var metadata = FindType(assembly.MainModule, "BlackHawk.QuickSell.Server.ModMetadata");
-        var constructors = metadata.Methods.Where(m => m.IsConstructor && !m.IsStatic).ToList();
-        var values = constructors.SelectMany(m => m.Body.Instructions)
-            .Where(i => i.OpCode == OpCodes.Ldstr && (string)i.Operand == "3.4.0")
-            .ToList();
-        if (values.Count != 1)
-            throw new InvalidOperationException($"Expected one server metadata version; found {values.Count}");
-        values[0].Operand = version;
-        SetAssemblyVersion(assembly, version);
         var temp = path + ".patched";
-        assembly.Write(temp);
+        using (var assembly = AssemblyDefinition.ReadAssembly(path))
+        {
+            var metadata = FindType(assembly.MainModule, "BlackHawk.QuickSell.Server.ModMetadata");
+            var constructors = metadata.Methods.Where(m => m.IsConstructor && !m.IsStatic).ToList();
+            var values = constructors.SelectMany(m => m.Body.Instructions)
+                .Where(i => i.OpCode == OpCodes.Ldstr && (string)i.Operand == "3.4.0")
+                .ToList();
+            if (values.Count != 1)
+                throw new InvalidOperationException($"Expected one server metadata version; found {values.Count}");
+            values[0].Operand = version;
+            SetAssemblyVersion(assembly, version);
+            assembly.Write(temp);
+        }
         File.Copy(temp, path, true);
         File.Delete(temp);
         Console.WriteLine($"Updated server mod and assembly version to {version}.");
