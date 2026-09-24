@@ -1,0 +1,85 @@
+name: Build QuickSell all-fixes test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/all-fixes-build
+    paths:
+      - ".github/workflows/build-all-fixes-test.yml"
+      - "tools/TestFixes/**"
+      - "tools/Patcher/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build runtime fixes helper
+        run: dotnet build tools/TestFixes/QuickSell.TestFixes.csproj -c Release
+
+      - name: Build binary patcher
+        run: dotnet build tools/Patcher/Patcher.csproj -c Release
+
+      - name: Download current QuickSell package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p work package
+          gh release download v3.4.0 \
+            --repo black-hawk95/BlackHawk-QuickSell \
+            --pattern "QuickSell.spt.4.1.port.v3.4.0.zip" \
+            --dir work
+          unzip -q work/QuickSell.spt.4.1.port.v3.4.0.zip -d package
+
+      - name: Apply all test fixes
+        shell: bash
+        run: |
+          QUICKSELL_DLL="$(find package -type f -name QuickSell.dll -print -quit)"
+          if [ -z "$QUICKSELL_DLL" ]; then
+            echo "QuickSell.dll not found in release package"
+            exit 1
+          fi
+
+          HELPER_DLL="tools/TestFixes/bin/Release/netstandard2.1/QuickSell.TestFixes.dll"
+          PATCHER_DLL="tools/Patcher/bin/Release/net8.0/Patcher.dll"
+
+          dotnet "$PATCHER_DLL" "$QUICKSELL_DLL" "$HELPER_DLL"
+          cp "$HELPER_DLL" "$(dirname "$QUICKSELL_DLL")/QuickSell.TestFixes.dll"
+
+          cat > package/TEST-BUILD.txt <<'EOF'
+          QuickSell v3.4.0 - all fixes TEST BUILD
+
+          Included test changes:
+          - Suppress QuickSell price tooltip on trader-owned inventory items to avoid Int32 overflow console spam.
+          - F12 option: "Play sell sound for each item".
+          - Composite trader pricing walks nested attachment/item trees and prices each component.
+          - Composite flea pricing includes cached prices of nested attachments/items in sale confirmation and tooltips.
+
+          This is a test build. It has not been merged into main.
+          EOF
+
+      - name: Package test build
+        run: |
+          cd package
+          zip -qr ../QuickSell-v3.4.0-test-all-fixes.zip .
+          cd ..
+          ls -lh QuickSell-v3.4.0-test-all-fixes.zip
+
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuickSell-v3.4.0-test-all-fixes
+          path: QuickSell-v3.4.0-test-all-fixes.zip
+          if-no-files-found: error
