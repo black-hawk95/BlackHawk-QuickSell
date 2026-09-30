@@ -40,6 +40,7 @@ namespace QuickSell
         private static ConfigEntry<bool> _ignoreFleaCapacity;
         private static ConfigEntry<bool> _sellFromContainers;
         private static ConfigEntry<bool> _sellFromSecureContainer;
+        private static ConfigEntry<string> _backpackRigPricingMode;
         private static ConfigEntry<int> _avgPricePercent;
         private static ConfigEntry<string> _tradersBlacklist;
         private static ConfigEntry<string> _availableTraders;
@@ -52,7 +53,11 @@ namespace QuickSell
         public static bool EnableQuickSellTraders => _enableQuickSellTraders?.Value ?? true;
         public static bool ShowConfirmationDialog => _showConfirmationDialog?.Value ?? true;
         public static bool IgnoreFleaCapacity => _ignoreFleaCapacity?.Value ?? false;
+        public const string BackpackRigPricingFullCache = "Full + Cache";
+        public const string BackpackRigPricingContainerOnly = "Container Only";
+
         public static bool SellFromContainers => _sellFromContainers?.Value ?? true;
+        public static string BackpackRigPricingMode => _backpackRigPricingMode?.Value ?? BackpackRigPricingFullCache;
 
         /// <summary>
         /// Defaults to FALSE deliberately. A secure container holds what people least want to
@@ -188,6 +193,23 @@ namespace QuickSell
                     "lose, selling cannot be undone, and with UI Fixes multi-select a mis-click " +
                     "takes several items at once.",
                     null, new ConfigurationManagerAttributes { Order = 89 }));
+
+            _backpackRigPricingMode = Config.Bind(SectionSelling, "Backpack / rig pricing mode",
+                BackpackRigPricingFullCache,
+                new ConfigDescription(
+                    "Controls how QuickSell prices backpacks and tactical rigs.\n\n" +
+                    "Full + Cache = include everything inside. The first calculation can still hitch " +
+                    "on a very large nested container, but unchanged item prices are cached and only " +
+                    "new or changed items need to be priced again.\n\n" +
+                    "Container Only = price only the backpack or rig itself and completely ignore " +
+                    "its contents. This is the fastest option.\n\n" +
+                    "Weapons are not affected; weapon attachments are still included.",
+                    new AcceptableValueList<string>(
+                        BackpackRigPricingFullCache,
+                        BackpackRigPricingContainerOnly),
+                    new ConfigurationManagerAttributes { Order = 88 }));
+
+            _backpackRigPricingMode.SettingChanged += (_, _) => TooltipPatch.Invalidate();
 
             _tradersBlacklist = Config.Bind(SectionSelling, "Never sell to", "",
                 new ConfigDescription(
