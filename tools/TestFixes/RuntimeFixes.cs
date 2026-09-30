@@ -19,7 +19,15 @@ namespace QuickSell.TestFixes
         private static MethodInfo _getAllItemsMethod;
         private static bool _getAllItemsResolved;
         private static MethodInfo _fleaTryGetMethod;
-        private static readonly Dictionary<string, string> TooltipItemTrees = new Dictionary<string, string>();
+        private static readonly Dictionary<string, ulong> TooltipItemTrees = new Dictionary<string, ulong>();
+        private static readonly Dictionary<object, Dictionary<string, TraderPriceCacheEntry>> TraderPriceCache =
+            new Dictionary<object, Dictionary<string, TraderPriceCacheEntry>>(ReferenceComparer.Instance);
+        private static int _traderPriceCacheEntries;
+        private const int MaxTraderPriceCacheEntries = 12000;
+        private static Type _backpackType;
+        private static Type _vestType;
+        private static bool _containerTypesResolved;
+        private static PropertyInfo _backpackRigPricingModeProperty;
         private static bool _globalFleaPatchInstalled;
         private static bool _globalFleaPatchWarningLogged;
         private static DateTime _nextFleaPatchAttempt;
@@ -315,12 +323,10 @@ namespace QuickSell.TestFixes
                 var id = GetMemberValue(item, "Id")?.ToString();
                 if (string.IsNullOrEmpty(id)) return;
 
-                // A tooltip is cached by root ID. Its attachments can change while that
-                // root ID stays the same, so include every child ID and stack count.
-                var tree = string.Join("|", EnumerateItemTree(item).Select(node =>
-                    GetMemberValue(node, "Id") + ":" +
-                    GetMemberValue(node, "TemplateId") + ":" +
-                    GetMemberValue(node, "StackObjectsCount")));
+                // Keep this check cheap. Full + Cache hashes the item tree without building
+                // strings or pricing anything. Container Only hashes the root only, so nested
+                // backpack contents are never walked just because the user hovered the bag.
+                var tree = ComputeTooltipTreeState(item);
 
                 if (TooltipItemTrees.TryGetValue(id, out var previous))
                 {
@@ -414,6 +420,11 @@ namespace QuickSell.TestFixes
                 if (rootItem == null || rootAverage <= 0)
                     return rootAverage;
 
+                // Maximum-performance mode for backpacks and tactical rigs: do not inspect
+                // or add the value of anything stored inside them. Weapons are unaffected.
+                if (UseContainerOnlyPricing(rootItem))
+                    return rootAverage;
+
                 var nodes = EnumerateItemTree(rootItem).ToList();
                 if (nodes.Count <= 1)
                     return rootAverage;
@@ -453,6 +464,12 @@ namespace QuickSell.TestFixes
             try
             {
                 var original = GetTraderPrice(trader, rootItem);
+
+                // Container Only deliberately uses the game's root-item quote and never walks
+                // backpack/rig contents. This is the fastest path and does not affect weapons.
+                if (UseContainerOnlyPricing(rootItem))
+                    return original;
+
                 var nodes = EnumerateItemTree(rootItem).ToList();
                 if (nodes.Count <= 1)
                     return original;
@@ -462,13 +479,10 @@ namespace QuickSell.TestFixes
 
                 foreach (var node in nodes)
                 {
-                    var clone = CloneItem(node);
-                    if (clone == null)
-                        return original;
-
-                    ClearChildren(clone);
-
-                    var price = GetTraderPrice(trader, clone);
+                    // Cache each isolated node independently. After one item is added, removed,
+                    // restacked or otherwise changes state, unchanged nodes are dictionary hits;
+                    // only the changed/new node has to be priced again.
+                    var price = GetCachedIsolatedTraderPrice(trader, node);
                     if (price <= 0)
                         continue;
 
@@ -487,6 +501,170 @@ namespace QuickSell.TestFixes
             {
                 return GetTraderPrice(trader, rootItem);
             }
+        }
+
+        private static int GetCachedIsolatedTraderPrice(object trader, object item)
+        {
+            if (trader == null || item == null) return 0;
+
+            var id = GetMemberValue(item, "Id")?.ToString();
+            if (string.IsNullOrEmpty(id))
+                return GetIsolatedTraderPrice(trader, item);
+
+            var state = ComputeShallowItemState(item);
+
+            if (TraderPriceCache.TryGetValue(trader, out var byItem) &&
+                byItem.TryGetValue(id, out var cached) &&
+                cached.State == state)
+            {
+                return cached.Price;
+            }
+
+            var price = GetIsolatedTraderPrice(trader, item);
+
+            // Zero can mean assortments are still loading, so never freeze a temporary miss.
+            if (price <= 0) return price;
+
+            if (_traderPriceCacheEntries >= MaxTraderPriceCacheEntries)
+            {
+                TraderPriceCache.Clear();
+                _traderPriceCacheEntries = 0;
+            }
+
+            if (!TraderPriceCache.TryGetValue(trader, out byItem))
+            {
+                byItem = new Dictionary<string, TraderPriceCacheEntry>();
+                TraderPriceCache[trader] = byItem;
+            }
+
+            if (!byItem.ContainsKey(id))
+                _traderPriceCacheEntries++;
+
+            byItem[id] = new TraderPriceCacheEntry { State = state, Price = price };
+            return price;
+        }
+
+        private static int GetIsolatedTraderPrice(object trader, object item)
+        {
+            // Leaf items have nothing to strip, so avoid a CloneItem reflection call entirely.
+            if (!HasChildren(item))
+                return GetTraderPrice(trader, item);
+
+            var clone = CloneItem(item);
+            if (clone == null)
+                return GetTraderPrice(trader, item);
+
+            ClearChildren(clone);
+            return GetTraderPrice(trader, clone);
+        }
+
+        private static bool HasChildren(object item)
+        {
+            try
+            {
+                foreach (var container in GetContainers(item))
+                {
+                    foreach (var child in GetContainerItems(container))
+                    {
+                        if (child != null) return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static ulong ComputeTooltipTreeState(object root)
+        {
+            if (root == null) return 0;
+
+            // In Container Only mode contents are intentionally irrelevant, so do not even
+            // enumerate them for cache invalidation.
+            if (UseContainerOnlyPricing(root))
+                return ComputeShallowItemState(root);
+
+            ulong hash = 14695981039346656037UL;
+            foreach (var node in EnumerateItemTree(root))
+            {
+                hash ^= ComputeShallowItemState(node);
+                hash *= 1099511628211UL;
+            }
+            return hash;
+        }
+
+        private static ulong ComputeShallowItemState(object item)
+        {
+            ulong hash = 14695981039346656037UL;
+            HashMember(ref hash, item, "Id");
+            HashMember(ref hash, item, "TemplateId");
+            HashMember(ref hash, item, "StackObjectsCount");
+
+            // Common mutable values. Missing members are simply ignored; the reflection helper
+            // already handles version differences safely.
+            HashMember(ref hash, item, "Durability");
+            HashMember(ref hash, item, "MaxDurability");
+            HashMember(ref hash, item, "Resource");
+            HashMember(ref hash, item, "HpResource");
+            HashMember(ref hash, item, "Value");
+            return hash;
+        }
+
+        private static void HashMember(ref ulong hash, object item, string member)
+        {
+            var value = GetMemberValue(item, member);
+            if (value == null) return;
+            HashString(ref hash, value.ToString());
+        }
+
+        private static void HashString(ref ulong hash, string value)
+        {
+            if (value == null) return;
+            for (var i = 0; i < value.Length; i++)
+            {
+                hash ^= value[i];
+                hash *= 1099511628211UL;
+            }
+            hash ^= 0xFF;
+            hash *= 1099511628211UL;
+        }
+
+        private static bool UseContainerOnlyPricing(object item)
+        {
+            if (!IsBackpackOrRig(item)) return false;
+
+            try
+            {
+                if (_backpackRigPricingModeProperty == null)
+                {
+                    var plugin = QuickSellAssembly?.GetType("QuickSell.Plugin", false);
+                    _backpackRigPricingModeProperty = plugin == null ? null :
+                        FindProperty(plugin, "BackpackRigPricingMode", true);
+                }
+
+                var value = _backpackRigPricingModeProperty?.GetValue(null)?.ToString();
+                return string.Equals(value, "Container Only", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsBackpackOrRig(object item)
+        {
+            if (item == null) return false;
+
+            if (!_containerTypesResolved)
+            {
+                _containerTypesResolved = true;
+                _backpackType = FindType("EFT.InventoryLogic.Backpack");
+                _vestType = FindType("EFT.InventoryLogic.Vest");
+            }
+
+            var type = item.GetType();
+            return (_backpackType != null && _backpackType.IsAssignableFrom(type)) ||
+                   (_vestType != null && _vestType.IsAssignableFrom(type));
         }
 
         private static int GetTraderPrice(object trader, object item)
@@ -844,6 +1022,12 @@ namespace QuickSell.TestFixes
                     .FirstOrDefault(a => string.Equals(a.GetName().Name, "Assembly-CSharp", StringComparison.OrdinalIgnoreCase));
                 return _gameAssembly;
             }
+        }
+
+        private sealed class TraderPriceCacheEntry
+        {
+            public ulong State;
+            public int Price;
         }
 
         private sealed class ReferenceComparer : IEqualityComparer<object>
