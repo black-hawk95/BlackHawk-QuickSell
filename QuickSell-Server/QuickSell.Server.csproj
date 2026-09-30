@@ -53,7 +53,7 @@
     does not need SPT present - somebody building from a clean checkout without an install should
     still get a DLL rather than an error.
   -->
-  <Target Name="CopyToServerMods" AfterTargets="PostBuildEvent">
+  <Target Name="CopyToServerMods" AfterTargets="PostBuildEvent" Condition="'$(DeployOnBuild)' != 'false'">
     <MakeDir Directories="$(ServerModsPath)"
              Condition="Exists('$(SptPath)\SPT_Runtime\user\mods')" />
 
