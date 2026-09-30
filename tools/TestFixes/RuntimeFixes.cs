@@ -20,8 +20,8 @@ namespace QuickSell.TestFixes
         private static bool _getAllItemsResolved;
         private static MethodInfo _fleaTryGetMethod;
         private static readonly Dictionary<string, ulong> TooltipItemTrees = new Dictionary<string, ulong>();
-        private static readonly Dictionary<object, Dictionary<string, TraderPriceCacheEntry>> TraderPriceCache =
-            new Dictionary<object, Dictionary<string, TraderPriceCacheEntry>>(ReferenceComparer.Instance);
+        private static readonly Dictionary<object, Dictionary<string, KeyValuePair<ulong, int>>> TraderPriceCache =
+            new Dictionary<object, Dictionary<string, KeyValuePair<ulong, int>>>(ReferenceComparer.Instance);
         private static int _traderPriceCacheEntries;
         private const int MaxTraderPriceCacheEntries = 12000;
         private static Type _backpackType;
@@ -515,9 +515,9 @@ namespace QuickSell.TestFixes
 
             if (TraderPriceCache.TryGetValue(trader, out var byItem) &&
                 byItem.TryGetValue(id, out var cached) &&
-                cached.State == state)
+                cached.Key == state)
             {
-                return cached.Price;
+                return cached.Value;
             }
 
             var price = GetIsolatedTraderPrice(trader, item);
@@ -533,14 +533,14 @@ namespace QuickSell.TestFixes
 
             if (!TraderPriceCache.TryGetValue(trader, out byItem))
             {
-                byItem = new Dictionary<string, TraderPriceCacheEntry>();
+                byItem = new Dictionary<string, KeyValuePair<ulong, int>>();
                 TraderPriceCache[trader] = byItem;
             }
 
             if (!byItem.ContainsKey(id))
                 _traderPriceCacheEntries++;
 
-            byItem[id] = new TraderPriceCacheEntry { State = state, Price = price };
+            byItem[id] = new KeyValuePair<ulong, int>(state, price);
             return price;
         }
 
@@ -1022,12 +1022,6 @@ namespace QuickSell.TestFixes
                     .FirstOrDefault(a => string.Equals(a.GetName().Name, "Assembly-CSharp", StringComparison.OrdinalIgnoreCase));
                 return _gameAssembly;
             }
-        }
-
-        private sealed class TraderPriceCacheEntry
-        {
-            public ulong State;
-            public int Price;
         }
 
         private sealed class ReferenceComparer : IEqualityComparer<object>
