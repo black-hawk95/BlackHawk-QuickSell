@@ -50,6 +50,7 @@ namespace QuickSell.Patches
             }
 
             Plugin.LogSource?.LogInfo($"QuickSell: loaded {prices.Count} flea prices; cache now holds {Prices.Count}.");
+            HoverPriceCache.OnFleaPricesChanged();
         }
 
         /// <summary>
@@ -106,7 +107,11 @@ namespace QuickSell.Patches
                 {
                     Pending.Remove(templateId);
 
-                    if (result != null) Prices[templateId] = result.avg;
+                    if (result != null)
+                    {
+                        Prices[templateId] = result.avg;
+                        HoverPriceCache.OnFleaPricesChanged();
+                    }
 
                     // Everyone waiting on this template is notified, whether the lookup succeeded
                     // or not. A caller counting responses must hear back either way, or it stalls.
@@ -145,6 +150,7 @@ namespace QuickSell.Patches
         public static void Clear()
         {
             Prices.Clear();
+            HoverPriceCache.InvalidateFlea();
             Pending.Clear();
 
             // Anything still waiting is released so no caller is left hanging on a request that

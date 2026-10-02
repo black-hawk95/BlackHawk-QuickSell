@@ -4,6 +4,7 @@ using EFT.Trading;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace QuickSell.Patches
 {
@@ -39,11 +40,17 @@ namespace QuickSell.Patches
         private static readonly HashSet<Trader> AssortmentLoaded =
             new(ReferenceEqualityComparer<Trader>.Instance);
 
+        // Keep the actual refresh task so the hover precompute can wait for trader price data
+        // without polling every frame or starting duplicate assortment requests.
+        private static readonly Dictionary<Trader, Task> AssortmentTasks =
+            new(ReferenceEqualityComparer<Trader>.Instance);
+
         /// <summary>Clears the cached traders and their assortment state.</summary>
         public static void Reset()
         {
             _traders = null;
             AssortmentLoaded.Clear();
+            AssortmentTasks.Clear();
         }
 
         /// <summary>
@@ -88,6 +95,7 @@ namespace QuickSell.Patches
             // operation or uncached tooltip, never per frame, so the cost is not worth the risk of
             // holding a stale set.
             AssortmentLoaded.Clear();
+            AssortmentTasks.Clear();
 
             // Tooltips cache their finished text, and any built from the previous trader objects
             // hold prices that are now wrong.
@@ -114,18 +122,37 @@ namespace QuickSell.Patches
         /// </summary>
         public static void EnsureAssortment(Trader trader)
         {
-            if (trader == null) return;
-            if (trader.Id == LightkeeperTraderId) return;
-            if (!AssortmentLoaded.Add(trader)) return;
+            _ = EnsureAssortmentAsync(trader);
+        }
+
+        /// <summary>
+        /// Starts an assortment refresh once and returns the SAME task to every caller.
+        /// Hover precomputation uses this to wait for SupplyData without frame polling.
+        /// </summary>
+        public static Task EnsureAssortmentAsync(Trader trader)
+        {
+            if (trader == null) return Task.CompletedTask;
+            if (trader.Id == LightkeeperTraderId) return Task.CompletedTask;
+
+            if (AssortmentTasks.TryGetValue(trader, out var existing))
+                return existing ?? Task.CompletedTask;
+
+            if (!AssortmentLoaded.Add(trader))
+                return Task.CompletedTask;
 
             try
             {
-                trader.RefreshAssortment(false, true);
+                var task = trader.RefreshAssortment(false, true) ?? Task.CompletedTask;
+                AssortmentTasks[trader] = task;
+                return task;
             }
             catch (Exception ex)
             {
                 Plugin.LogSource?.LogWarning(
                     $"QuickSell: failed to refresh assortment for trader {trader.Id}: {ex.Message}");
+                var completed = Task.CompletedTask;
+                AssortmentTasks[trader] = completed;
+                return completed;
             }
         }
 
@@ -137,13 +164,20 @@ namespace QuickSell.Patches
         /// </summary>
         public static void EnsureAllAssortments(IEftSession session)
         {
-            var traders = GetTraders(session);
-            if (traders == null) return;
+            _ = EnsureAllAssortmentsAsync(session);
+        }
 
-            foreach (var trader in traders)
-            {
-                EnsureAssortment(trader);
-            }
+        /// <summary>Returns when all refreshes started by QuickSell have completed.</summary>
+        public static Task EnsureAllAssortmentsAsync(IEftSession session)
+        {
+            var traders = GetTraders(session);
+            if (traders == null || traders.Length == 0) return Task.CompletedTask;
+
+            var tasks = new Task[traders.Length];
+            for (int i = 0; i < traders.Length; i++)
+                tasks[i] = EnsureAssortmentAsync(traders[i]);
+
+            return Task.WhenAll(tasks);
         }
 
         /// <summary>

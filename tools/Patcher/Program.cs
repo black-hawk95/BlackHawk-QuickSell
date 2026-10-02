@@ -46,7 +46,8 @@ internal static class Program
         PatchTraderOffer(module, ImportHelper("GetBestTraderOffer"));
         PatchGlobalFleaBlockInstaller(module, ImportHelper("EnsureGlobalFleaBlockInstalled"));
         PatchFleaComposite(module, "QuickSell.Patches.ContextMenuPatch", "ShowFleaConfirmation", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: false);
-        PatchFleaComposite(module, "QuickSell.Patches.TooltipPatch", "BuildPriceLines", ImportHelper("GetCompositeFleaPrice"), itemIsArgument: true);
+        // Tooltip pricing now reads HoverPriceCache, which already contains the full tree total.
+        // Do not inject the old recursive composite calculation back into the hover path.
 
         if (args.Length == 4)
             SetClientVersion(quick, args[3]);

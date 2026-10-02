@@ -35,7 +35,7 @@ When upgrading from v4.0.0, delete `BepInEx\plugins\QuickSell\QuickSell.TestFixe
 
 **The server component is optional but recommended.** Without it, flea prices are looked up one item at a time and are unavailable in raid. With it, the full price table loads once at startup and works everywhere.
 
-**Fika:** Install the client plugin on playing PCs only. **Do not install `QuickSell.dll` in `BepInEx\plugins` on the headless PC.** Install the server component in `SPT_Runtime\user\mods\QuickSell` on the SPT server. The client plugin also detects headless and disables itself if installed there by mistake.
+**Fika:** works on client and server. Detects headless clients and disables itself there.
 
 ## Configuration
 
@@ -73,7 +73,8 @@ Built so that a raid costs effectively nothing.
 - **Keybinds check the key first.** `ItemUiContext.Update` runs every frame; the keybind test used to be the last thing in it, so every frame paid for reflection, LINQ and a `GetComponent` before discovering no key was pressed. Now it is two field reads and a return.
 - **No per-frame allocation.** The reflection cache was keyed on an interpolated string (an allocation every frame) and UI Fixes' `Count` was a reflection invoke (an array plus a boxed int per call). Both are now allocation-free.
 - **Trader assortments load lazily.** The original hooked the `Trader` constructor and force-refreshed every trader at startup, holding all of it for the session. Now nothing loads until a sale or price lookup needs it.
-- **Tooltips are cached per item.** Building the price lines costs a few milliseconds, mostly in asking every trader what it would pay. Changing attachments or stack counts invalidates the cached price.
+- **Large-container hover does no tree pricing.** When the inventory opens, QuickSell walks the player inventory once and calculates single-item prices directly, without cloning items or recursively asking traders to price each container tree. Native add/remove/refresh events then update only the changed item and its parent containers by delta. Hover itself only reads the finished cache.
+- **No frame-spread calculator.** There is no per-frame pricing queue or worker thread touching EFT inventory objects.
 - **Bulk selling prices each item once.** It used to find the best trader once to build the confirmation total and again to perform the sale: 30 items meant 60 full trader sweeps.
 - **Flea prices are fetched per template, not per item.** Selling 20 identical items fired 20 identical requests.
 

@@ -305,44 +305,10 @@ namespace QuickSell.TestFixes
 
         public static void InvalidateTooltipIfContentsChanged()
         {
-            try
-            {
-                var uiType = FindType("EFT.UI.ItemUiContext");
-                var ui = uiType == null ? null : FindProperty(uiType, "Instance", true)?.GetValue(null);
-                if (ui == null && uiType != null)
-                    ui = FindField(uiType, "Instance", true)?.GetValue(null);
-                var item = GetMemberValue(GetMemberValue(ui, "CurrentItemContext"), "Item");
-                var id = GetMemberValue(item, "Id")?.ToString();
-                if (string.IsNullOrEmpty(id)) return;
-
-                // A tooltip is cached by root ID. Its attachments can change while that
-                // root ID stays the same, so include every child ID and stack count.
-                var tree = string.Join("|", EnumerateItemTree(item).Select(node =>
-                    GetMemberValue(node, "Id") + ":" +
-                    GetMemberValue(node, "TemplateId") + ":" +
-                    GetMemberValue(node, "StackObjectsCount")));
-
-                if (TooltipItemTrees.TryGetValue(id, out var previous))
-                {
-                    if (previous == tree) return;
-
-                    var tooltipType = QuickSellAssembly?.GetType("QuickSell.Patches.TooltipPatch", false);
-                    var resultCache = tooltipType == null ? null :
-                        FindField(tooltipType, "ResultCache", true)?.GetValue(null) as IDictionary;
-                    resultCache?.Remove(id);
-                }
-
-                if (TooltipItemTrees.Count >= 4000)
-                {
-                    TooltipItemTrees.Clear();
-                    var tooltipType = QuickSellAssembly?.GetType("QuickSell.Patches.TooltipPatch", false);
-                    tooltipType?.GetMethod("Invalidate", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                        ?.Invoke(null, null);
-                }
-
-                TooltipItemTrees[id] = tree;
-            }
-            catch { /* A tooltip must still open even if cache invalidation fails. */ }
+            // Intentionally empty. v4.0.1 used to enumerate the full item tree here before
+            // every tooltip cache lookup. On very large backpacks/cases that made even a cache HIT
+            // hitch. The client now invalidates the affected tooltip entries from EFT's native
+            // add/remove/refresh inventory events instead, so hover itself stays O(1).
         }
 
         public static object[] GetBestTraderOffer(object item, object session)

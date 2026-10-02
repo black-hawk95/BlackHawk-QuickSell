@@ -1,4 +1,4 @@
-using BepInEx;
+﻿using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -26,6 +26,7 @@ namespace QuickSell
         private const string SectionSelling = "1. Selling";
         private const string SectionTooltips = "2. Tooltips";
         private const string SectionColors = "3. Colors";
+        private const string SectionDebug = "9. Debug";
 
         private static readonly Version UIFixesMinimumVersion = new(2, 5);
         private static readonly string[] UIFixesPluginIds = { "com.tyfon.uifixes", "Tyfon.UIFixes" };
@@ -53,7 +54,6 @@ namespace QuickSell
         public static bool ShowConfirmationDialog => _showConfirmationDialog?.Value ?? true;
         public static bool IgnoreFleaCapacity => _ignoreFleaCapacity?.Value ?? false;
         public static bool SellFromContainers => _sellFromContainers?.Value ?? true;
-
         /// <summary>
         /// Defaults to FALSE deliberately. A secure container holds what people least want to
         /// lose, selling cannot be undone, and with multi-select one mistake takes several items.
@@ -74,6 +74,7 @@ namespace QuickSell
         private static ConfigEntry<bool> _enableColorCoding;
         private static ConfigEntry<bool> _useAmmoPenetrationTiers;
         internal static ConfigEntry<float> TooltipDelayEntry;
+        private static ConfigEntry<bool> _debugLogging;
 
         public static bool ShowPriceTooltips => _showPriceTooltips?.Value ?? true;
         public static bool ShowTraderPriceInTooltip => _showTraderPriceInTooltip?.Value ?? true;
@@ -84,6 +85,7 @@ namespace QuickSell
 
         public static bool OverrideTooltipDelay = true;
         public static float TooltipDelay => TooltipDelayEntry?.Value ?? 0.2f;
+        public static bool DebugLogging => _debugLogging?.Value ?? false;
 
         // ------------------------------------------------------------------ colors (config.json)
 
@@ -122,13 +124,20 @@ namespace QuickSell
             BindSellingSettings();
             BindTooltipSettings();
             BindColorInfo();
+            BindDebugSettings();
 
             EnableUIFixesIntegration = UIFixesDetected;
 
             new ContextMenuShowPatch().Enable();
             new ContextMenuShowMenuPatch().Enable();
 
-            if (ShowPriceTooltips) new TooltipPatch().Enable();
+            if (ShowPriceTooltips)
+            {
+                new TooltipPatch().Enable();
+                TooltipCacheInvalidationPatch.Enable();
+                new MenuPrecomputePatch().Enable();
+                new InventoryPrecomputePatch().Enable();
+            }
             if (OverrideTooltipDelay) TooltipDelayPatch.TryEnable();
 
             if (!DisableKeybinds) KeybindPatches.Enable();
@@ -383,6 +392,21 @@ namespace QuickSell
                 "they are lists of values, which this menu cannot edit. Restart the game after " +
                 "changing them.",
                 _listStyle, GUILayout.ExpandWidth(true));
+        }
+
+        private void BindDebugSettings()
+        {
+            _debugLogging = Config.Bind(SectionDebug, "Debug logging", false,
+                new ConfigDescription(
+                    "Write lightweight QuickSell cache/performance diagnostics to LogOutput.log.\n\n" +
+                    "Off by default. Enable only while testing a problem.",
+                    null, new ConfigurationManagerAttributes { Order = 1 }));
+        }
+
+        internal static void DebugLog(string message)
+        {
+            if (!DebugLogging) return;
+            LogSource?.LogInfo("[QSPERF] " + message);
         }
 
         // ------------------------------------------------------------------ trader blacklist

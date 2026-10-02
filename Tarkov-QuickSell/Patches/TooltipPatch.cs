@@ -4,6 +4,7 @@ using HarmonyLib;
 using SPT.Reflection.Patching;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -52,6 +53,13 @@ namespace QuickSell.Patches
         {
             ResultCache.Clear();
             _assortmentsRequested = false;
+            if (Plugin.DebugLogging) Plugin.DebugLog("CACHE_CLEAR all");
+        }
+
+        internal static bool InvalidateItem(string itemId)
+        {
+            if (string.IsNullOrEmpty(itemId)) return false;
+            return ResultCache.Remove(itemId);
         }
 
         protected override MethodBase GetTargetMethod()
@@ -89,10 +97,24 @@ namespace QuickSell.Patches
 
                 var id = item.Id.ToString();
 
-                // Cache hit is the common case once the stash has been browsed once.
-                if (!ResultCache.TryGetValue(id, out var suffix))
+                // Cache hit is deliberately O(1). The old v4.0.1 helper recursively walked
+                // every child on every hover just to decide whether this cache entry was stale.
+                // Inventory mutation patches now invalidate only the changed item/parent chain.
+                if (ResultCache.TryGetValue(id, out var suffix))
                 {
+                    if (Plugin.DebugLogging)
+                        Plugin.DebugLog($"TOOLTIP cache=HIT id={id} type={item.GetType().Name}");
+                }
+                else
+                {
+                    Stopwatch sw = Plugin.DebugLogging ? Stopwatch.StartNew() : null;
                     suffix = BuildPriceLines(item, out var complete) ?? string.Empty;
+                    sw?.Stop();
+
+                    if (Plugin.DebugLogging)
+                    {
+                        Plugin.DebugLog($"TOOLTIP cache=MISS id={id} type={item.GetType().Name} complete={complete} ms={(sw?.Elapsed.TotalMilliseconds ?? 0):0.00} chars={suffix.Length}");
+                    }
 
                     // Only a COMPLETE result is cached.
                     //
@@ -137,82 +159,72 @@ namespace QuickSell.Patches
             string traderName = null;
             double fleaPrice = 0;
 
+            var session = ContextMenuPatch.GetSession();
+            if (session != null && Plugin.ShowTraderPriceInTooltip && !_assortmentsRequested)
+            {
+                _assortmentsRequested = true;
+                TraderService.EnsureAllAssortments(session);
+            }
+
+            if (session != null)
+                HoverPriceCache.EnsureTransientForNonPlayer(item, session);
+
             if (Plugin.ShowTraderPriceInTooltip)
             {
-                // Trader prices are menu-only: in raid there is no session and no trader data.
-                var session = ContextMenuPatch.GetSession();
+                // IMPORTANT: player-inventory tooltip hover only READS the precomputed cache. It
+                // never walks a large backpack/case tree here. A small direct fallback exists only
+                // for non-player/world items so Loot Like PUBG keeps its price bridge.
                 if (session != null)
                 {
-                    // Assortments must be loaded before GetUserItemPrice returns anything. Since
-                    // assortments now load lazily rather than at startup, the tooltip has to ask
-                    // for them itself - without this every trader returns null and no trader line
-                    // ever appears.
-                    //
-                    // Guarded by a flag rather than relying on the per-trader set inside
-                    // TraderService, so the common case is one bool test instead of a loop over
-                    // every trader on every hover.
-                    if (!_assortmentsRequested)
-                    {
-                        _assortmentsRequested = true;
-                        TraderService.EnsureAllAssortments(session);
-                    }
 
-                    if (TraderService.TryGetBestOffer(item, session, out var trader, out var price))
+                    if (HoverPriceCache.TryGetBestTrader(
+                        item, session, out var trader, out var price, out var traderComplete))
                     {
                         traderName = trader.LocalizedName;
                         traderPrice = price;
                     }
-                    else if (TraderService.AssortmentsLoading(session))
-                    {
-                        // No trader bought it, but at least one is still fetching its assortment,
-                        // so "nobody buys this" is not yet a trustworthy answer.
+
+                    if (!traderComplete || TraderService.AssortmentsLoading(session))
                         complete = false;
-                    }
                 }
                 else
                 {
-                    // No session yet; the answer may differ once there is one.
                     complete = false;
                 }
             }
 
             if (Plugin.ShowFleaPriceInTooltip)
             {
-                // Cache only - never a network call. This is what allows tooltips in raid without
-                // touching the server: the table was fetched once at startup.
-                if (FleaPriceCache.TryGet(item.TemplateId, out var cached))
+                if (HoverPriceCache.TryGetFlea(item, out var cachedTotal, out var fleaComplete))
                 {
-                    fleaPrice = cached * item.StackObjectsCount;
+                    fleaPrice = cachedTotal;
                 }
-                else if (!ModEnvironment.IsInRaid)
-                {
-                    // Outside raid an unknown template can be resolved in the background so the
-                    // next hover has it. Deliberately not done in raid.
-                    var ragFair = ContextMenuPatch.GetSession()?.RagFair;
-                    if (ragFair != null) FleaPriceCache.RequestIfMissing(ragFair, item.TemplateId);
 
-                    // The price is on its way, so this result would be missing a line.
+                if (!fleaComplete)
+                {
                     complete = false;
+
+                    // Keep the original missing-template request behavior, but only request the
+                    // price table here. The container total itself is rebuilt away from hover.
+                    if (!ModEnvironment.IsInRaid)
+                    {
+                        var ragFair = session?.RagFair;
+                        if (ragFair != null)
+                            FleaPriceCache.RequestIfMissing(ragFair, item.TemplateId);
+                    }
                 }
             }
 
             if (traderName == null && fleaPrice <= 0) return null;
 
-            // Whichever pays more gets highlighted, so the "sell it here" answer is visible without
-            // comparing the numbers.
             bool fleaWins = fleaPrice > traderPrice;
-
             var sb = new StringBuilder();
 
             if (traderName != null)
-            {
                 AppendLine(sb, traderName, traderPrice, item, isBest: !fleaWins);
-            }
 
             if (fleaPrice > 0)
-            {
                 AppendLine(sb, "Flea market", fleaPrice, item, isBest: fleaWins);
-            }
 
             return sb.ToString();
         }
