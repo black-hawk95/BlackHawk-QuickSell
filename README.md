@@ -1,91 +1,260 @@
-﻿# QuickSell — SPT 4.1.3
+# QuickSell — SPT 4.1.x
 
-**SPT 4.1.3 port of QuickSell. All credit goes to the original author.**
+**Fast trader and flea selling for SPT, with price tooltips, multi-select support, safe flea pricing, and low-overhead caching.**
+
+This is an SPT 4.1.x port and continuation of the original QuickSell mod.
 
 - **Original mod:** [TadMaj](https://github.com/TadMaj/Tarkov-QuickSell)
 - **Multiselect interop:** Tyfon (UI Fixes)
 - **Price tooltip approach inspired by:** SwiftXP (Show Me The Money)
 - **License:** MIT (unchanged)
 
-This port was uploaded to keep the mod available on SPT 4.1.3. If TadMaj asks me to take it down, I will remove it immediately, no questions asked. Same goes if they would rather publish their own 4.1 version — this repo exists only until then.
+If the original author asks me to take this port down, I will remove it.
 
 ---
 
-Sell stash items fast — to whichever trader pays most, or straight onto the flea.
+## Features
 
-- **Context menu:** right-click any stash item for **QuickSell (Flea)** and **QuickSell (Trader)**
-- **Keybinds:** `N` flea, `M` traders
-- **Price tooltips:** best trader price and flea price on hover, colour-coded by value
-- **Multi-select:** with UI Fixes installed, sell many items in one confirmation
+### Quick selling
 
-Traders are picked automatically by best offer, including attached parts. Flea listings use the average market price.
+- **Sell to the best trader automatically**
+  - QuickSell checks the available traders and picks the one paying the most.
+  - Attached parts are included in the value.
+  - Modded traders are supported automatically.
+- **Sell directly to the flea market**
+  - Right-click an item and choose **QuickSell (Flea)**.
+  - Flea listing price can be adjusted from **25% to 200%** of the calculated market price.
+- **Context-menu selling**
+  - **QuickSell (Trader)**
+  - **QuickSell (Flea)**
+- **Keyboard shortcuts**
+  - Default flea key: **N**
+  - Default trader key: **M**
+- **Confirmation window**
+  - Shows the sale/listing total before anything is sold.
+  - Flea confirmation also shows the listing fee and net profit.
+- **Sell from containers**
+  - Can sell items directly from backpacks, rigs and pockets.
+  - Secure-container selling has its own safety option.
+- **Trader blacklist**
+  - Exclude traders you never want QuickSell to use.
+  - Works with normal and modded traders.
 
-## Installation
+### Multi-select selling
 
-1. Extract into your **SPT root folder** (the one containing `BepInEx\` and `EscapeFromTarkov_Data\`)
-2. Client files land in `BepInEx\plugins\QuickSell\`
-3. Server files land in `SPT_Runtime\user\mods\QuickSell\`
-4. Start SPT
+With **UI Fixes** installed, QuickSell can sell multiple selected items in one operation.
 
-When upgrading from v4.0.0, delete `BepInEx\plugins\QuickSell\QuickSell.TestFixes.dll` before extracting the new ZIP. All client code is now inside `QuickSell.dll`.
+- One confirmation for the selection.
+- Each item still goes to its best trader when trader selling.
+- Flea listings are created for the selected items.
+- Compatible UI Fixes integration is detected automatically.
 
-**Requires SPT 4.1.3–4.1.x.** Will not work on 4.0.x or 4.2+.
+### Price tooltips
 
-**Optional:** [UI Fixes](https://sp-mod.com/mods) 6.0.0+ for multi-select selling.
+QuickSell adds price information directly to item tooltips.
 
-**The server component is optional but recommended.** Without it, flea prices are looked up one item at a time and are unavailable in raid. With it, the full price table loads once at startup and works everywhere.
+- **Best trader price**
+- **Flea market price**
+- **Colour-coded value tiers**
+- **Ammo penetration-based colouring option**
+- Works with:
+  - Weapons and attached parts
+  - Nested containers
+  - Large backpacks/cases
+  - Ammo stacks
+  - Meds and other consumables
+  - Modded items where normal EFT pricing data is available
 
-**Fika:** install `QuickSell.dll` on playing clients only, and install the QuickSell server component on the SPT server/headless host. If the client DLL is accidentally present on a headless client, QuickSell detects that and disables the client plugin.
+The flea tooltip shows the price QuickSell is configured to list at, so changing the F12 flea percentage also changes the displayed flea value.
 
-## Configuration
+### Flea pricing
 
-Settings are in the **F12 menu** under QuickSell:
+QuickSell uses the currently generated flea offers when available instead of relying only on the underlying base-price table.
 
-- **1. Selling** — which context menu entries to show, confirmation dialog, flea listing price, trader blacklist, keybinds
-- **Allow flea market selling** in F12 blocks both QuickSell flea sales and normal flea listings when disabled. Flea buying remains available.
-- **Refresh flea prices** in F12 updates cached flea prices; an optional hotkey can trigger the same refresh. Trader prices are calculated from the current item and its attachments.
-- **2. Tooltips** — which prices to show, whether to show them in raid, tooltip delay, colour coding
-- **3. Colors** — points to the config file
-- **4. Sounds** — separate trader/flea sound toggles and once-per-batch/per-item mode
+- Current generated flea offer averages are preferred.
+- SPT dynamic/base prices are used as a fallback.
+- Weapons use the base weapon price while attachments are added separately to avoid double-counting.
+- Manual **Refresh flea prices** is available from F12.
+- Refresh keeps the previous completed table active until the new table is ready, so tooltips do not temporarily lose their flea value.
 
-Tier colours and their thresholds are in `BepInEx\plugins\QuickSell\config.json`, because each one is a list of values that the F12 menu cannot edit. That file is optional; delete it to restore defaults.
+### Stack and consumable pricing
 
-### Blacklisting a trader
+QuickSell accounts for the actual item being sold.
 
-Use **Never sell to** in the F12 menu, comma-separated (`Fence, Ragman`). The **Traders on this profile** box below it lists every trader you can name, modded ones included, so you can copy from it. Names match case-insensitively, and a trader's ID works too if a translated name won't match.
+- **Ammo stacks:** tooltip shows the value of the entire stack, not one round.
+- **Meds:** price scales with remaining HP/resource.
+- **Food and drinks:** price scales with remaining resource.
+- **Repair kits:** price scales with remaining repair resource.
+- **Generic resource items:** remaining resource is taken into account when supported by EFT's normal resource component.
 
-## Uninstalling
+Example: an item with roughly 50% of its usable resource remaining is valued at roughly 50% of its full flea value before applying your configured flea percentage.
 
-Delete `BepInEx\plugins\QuickSell\` and `SPT_Runtime\user\mods\QuickSell\`. Nothing is written to your profile.
+### Sound controls
 
-## Network activity
+F12 includes a dedicated **4. Sounds** section.
 
-The client fetches the flea price table at startup and when you request a refresh from your own local SPT server (`/quicksell/getFleaPrices`). No external servers, no telemetry, no data collection. Nothing is fetched during a raid.
+- **Trader sell sound** — On / Off
+- **Flea listing sound** — On / Off
+- **Sound mode**
+  - **Once per batch**
+  - **Per item**
 
----
+### Flea selling control
 
-## Notes for the curious
+QuickSell includes an option to disable flea selling while keeping flea buying available.
+
+When disabled, QuickSell blocks both its own flea-sale action and normal flea listings.
 
 ### Performance
 
-Built so that a raid costs effectively nothing.
+The current QuickSell pricing system is designed so hovering items stays very cheap.
 
-- **Keybinds check the key first.** `ItemUiContext.Update` runs every frame; the keybind test used to be the last thing in it, so every frame paid for reflection, LINQ and a `GetComponent` before discovering no key was pressed. Now it is two field reads and a return.
-- **No per-frame allocation.** The reflection cache was keyed on an interpolated string (an allocation every frame) and UI Fixes' `Count` was a reflection invoke (an array plus a boxed int per call). Both are now allocation-free.
-- **Trader assortments load lazily.** The original hooked the `Trader` constructor and force-refreshed every trader at startup, holding all of it for the session. Now nothing loads until a sale or price lookup needs it.
-- **Large-container hover does no tree pricing.** When the inventory opens, QuickSell walks the player inventory once and calculates single-item prices directly, without cloning items or recursively asking traders to price each container tree. Native add/remove/refresh events schedule a deferred inventory reconciliation away from hover. Hover itself only reads the finished cache.
-- **No frame-spread calculator.** There is no per-frame pricing queue or worker thread touching EFT inventory objects.
-- **Bulk selling prices each item once.** It used to find the best trader once to build the confirmation total and again to perform the sale: 30 items meant 60 full trader sweeps.
-- **Flea prices are fetched per template, not per item.** Selling 20 identical items fired 20 identical requests.
+- Player inventory prices are **precomputed** rather than rebuilding full container trees on every hover.
+- Large backpacks and cases use finished cached totals.
+- Inventory add/remove/refresh events reconcile the cache away from the hover path.
+- No per-frame flea-price polling.
+- No frame-spread price calculator.
+- No worker thread touches live EFT inventory objects.
+- Trader assortments are loaded lazily.
+- Repeated flea prices are cached by template.
+- Multi-item trader selling avoids unnecessarily pricing the same item twice.
 
-### Server load
+Optional **Debug logging** in F12 writes lightweight `[QSPERF]` diagnostics to `LogOutput.log`.
 
-The price table is fetched **once per client at startup**, never on a timer. On a Fika server with ten players that is ten requests total, at menu time where latency is invisible — rather than a poll multiplying by player count forever. The server caches the computed table so simultaneous connections cost one computation.
+---
 
-### Modded traders
+## Installation
 
-Nothing is hardcoded. The trader list comes from the server, and any trader that does not buy an item is skipped. Traders released in future work with no changes.
+1. Extract the release ZIP into your **SPT root folder**.
+2. Client files go to:
+   `BepInEx\plugins\QuickSell\`
+3. Server files go to:
+   `SPT_Runtime\user\mods\QuickSell\`
+4. Start SPT.
 
+When upgrading from v4.0.0, delete:
+
+`BepInEx\plugins\QuickSell\QuickSell.TestFixes.dll`
+
+All client code is now packaged into `QuickSell.dll`.
+
+**Supported SPT:** 4.1.3–4.1.x.
+
+**Optional:** UI Fixes 6.0.0+ for multi-select selling.
+
+### Server component
+
+The server component is optional but recommended.
+
+With it:
+
+- The full flea price table is loaded at startup.
+- Flea tooltips work in raid.
+- Manual refresh can fetch the current table in one request.
+
+Without it, QuickSell falls back to per-template lookups outside raid.
+
+### Fika
+
+- Install `QuickSell.dll` on **playing clients**.
+- Install the QuickSell server component on the SPT server/headless host.
+- Do **not** install the client DLL as an active gameplay plugin on the Fika headless client.
+- QuickSell also detects a headless client and disables its client-side plugin if installed there accidentally.
+
+---
+
+## Configuration
+
+All normal settings are available in the **F12 menu**.
+
+### 1. Selling
+
+Includes:
+
+- Trader context-menu entry
+- Flea context-menu entry
+- Confirmation dialog
+- Flea listing percentage (**25%–200%**)
+- Flea selling enable/disable
+- Offer-slot handling
+- Sell-from-container options
+- Secure-container option
+- Trader blacklist
+- Keybinds
+
+### 2. Tooltips
+
+Includes:
+
+- Enable/disable price tooltips
+- Best trader price
+- Flea price
+- In-raid price display
+- Tooltip delay
+- Value colouring
+- Ammo penetration tiers
+- Manual flea-price refresh
+
+### 3. Colors
+
+Tier colours and thresholds are stored in:
+
+`BepInEx\plugins\QuickSell\config.json`
+
+The file contains the colour arrays and price/ammo tier thresholds that are not practical to edit as individual F12 entries.
+
+Delete the file to restore its defaults.
+
+### 4. Sounds
+
+Includes:
+
+- Trader sell sound
+- Flea listing sound
+- Once-per-batch / per-item mode
+
+### 9. Debug
+
+Optional `[QSPERF]` performance/cache diagnostics.
+
+---
+
+## Network activity
+
+QuickSell only talks to your own SPT server.
+
+The client fetches the flea price table:
+
+- Once at startup
+- When you manually request a flea-price refresh
+
+There is:
+
+- No external QuickSell server
+- No telemetry
+- No analytics/data collection
+- No periodic network polling during raids
+
+---
+
+## Uninstalling
+
+Delete:
+
+- `BepInEx\plugins\QuickSell\`
+- `SPT_Runtime\user\mods\QuickSell\`
+
+QuickSell does not permanently modify your profile.
+
+---
+
+## Changelog
+
+Version-specific changes are kept in `docs/changelog/`.
+
+The README describes the **complete current feature set**, not only the latest release.
+
+---
 
 ## License
 
@@ -93,13 +262,18 @@ MIT, unchanged from upstream. See `LICENSE.txt`.
 
 ---
 
+### Support / Donations
+
 If you'd like to support my work, you can [buy me a coffee](https://ko-fi.com/its_blackhawk) ☕
 
-## v4.3.0 update
 
-- Flea tooltips and listings use the same configured percentage, with a **25%–200%** range.
-- Ammo tooltips show the value of the full stack.
-- Partially used meds, food/drinks, repair kits and resource items scale by remaining resource.
-- Manual flea refresh swaps price tables only after the refreshed table is ready.
-- Current generated flea offers are used for market pricing, with SPT dynamic/base prices as fallback.
-- Separate trader/flea sound controls with once-per-batch or per-item modes.
+**Solana (SOL)**  
+`RtkZyhpCD7rAmcsocf3RWPizCCzEdGNuUAX7sBcD1pF`
+
+**Bitcoin (BTC)**  
+`bc1qj983ved6kp4uz6r6t285j0r5tyf5h6jph9eajl`
+
+**Ethereum (ETH)**  
+`0xEaA910a5A779C85Fb9F07CA22bd2d2847a5969A5`
+
+Please double-check the address and network before sending.
