@@ -1,4 +1,4 @@
-using EFT.InventoryLogic;
+﻿using EFT.InventoryLogic;
 using EFT.UI;
 using HarmonyLib;
 using SPT.Reflection.Patching;
