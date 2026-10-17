@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using SPT.Common.Http;
 using System;
 using System.Collections.Generic;
@@ -30,7 +30,7 @@ namespace QuickSell.Patches
         /// Requests the price table. Safe to call when the server mod is absent - it logs and the
         /// mod carries on with per-hover lookups instead.
         /// </summary>
-        public static void FetchAsync(Action onComplete = null)
+        public static void FetchAsync(Action onComplete = null, bool forceServerRefresh = false)
         {
             if (_fetchInFlight) return;
             if (ModEnvironment.IsHeadlessClient) return;
@@ -41,7 +41,8 @@ namespace QuickSell.Patches
             {
                 try
                 {
-                    var json = RequestHandler.GetJson(Route);
+                    var route = forceServerRefresh ? Route + "?force=true" : Route;
+                    var json = RequestHandler.GetJson(route);
 
                     if (string.IsNullOrEmpty(json))
                     {
@@ -60,11 +61,10 @@ namespace QuickSell.Patches
                         return;
                     }
 
+                    // LoadBulk swaps the price table and queues the aggregate rebuild. The
+                    // finished tooltip cache is invalidated only after that rebuild completes on
+                    // Unity's main thread, so refresh never exposes a half-updated state.
                     FleaPriceCache.LoadBulk(prices);
-
-                    // Any tooltip built before the table arrived has no flea line in it, so those
-                    // cached results are now wrong and must be discarded.
-                    TooltipPatch.Invalidate();
 
                     onComplete?.Invoke();
                 }
@@ -81,7 +81,13 @@ namespace QuickSell.Patches
             });
         }
 
-        /// <summary>Clears the cache and re-fetches. Wired to the F12 refresh button.</summary>
+        /// <summary>
+        /// Re-fetches the table without clearing the currently usable prices first.
+        ///
+        /// Keeping the old snapshot alive during the request avoids a short window where tooltips
+        /// lose their flea line and report incomplete prices. The new table replaces the old one
+        /// only after the server response has arrived successfully.
+        /// </summary>
         public static void ForceRefresh()
         {
             if (ModEnvironment.IsInRaid)
@@ -90,8 +96,7 @@ namespace QuickSell.Patches
                 return;
             }
 
-            FleaPriceCache.Clear();
-            FetchAsync();
+            FetchAsync(forceServerRefresh: true);
         }
     }
 }
