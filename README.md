@@ -1,4 +1,4 @@
-# QuickSell — SPT 4.1.3
+﻿# QuickSell — SPT 4.1.3
 
 **SPT 4.1.3 port of QuickSell. All credit goes to the original author.**
 
@@ -29,24 +29,24 @@ Traders are picked automatically by best offer, including attached parts. Flea l
 
 When upgrading from v4.0.0, delete `BepInEx\plugins\QuickSell\QuickSell.TestFixes.dll` before extracting the new ZIP. All client code is now inside `QuickSell.dll`.
 
-**Requires SPT 4.1.3** (EFT `0.16.9.5.40743`). Will not work on 4.0.x.
+**Requires SPT 4.1.3–4.1.x.** Will not work on 4.0.x or 4.2+.
 
 **Optional:** [UI Fixes](https://sp-mod.com/mods) 6.0.0+ for multi-select selling.
 
 **The server component is optional but recommended.** Without it, flea prices are looked up one item at a time and are unavailable in raid. With it, the full price table loads once at startup and works everywhere.
 
-**Fika:** works on client and server. Detects headless clients and disables itself there.
+**Fika:** install `QuickSell.dll` on playing clients only, and install the QuickSell server component on the SPT server/headless host. If the client DLL is accidentally present on a headless client, QuickSell detects that and disables the client plugin.
 
 ## Configuration
 
-Settings are in the **F12 menu** under QuickSell, in three sections:
+Settings are in the **F12 menu** under QuickSell:
 
 - **1. Selling** — which context menu entries to show, confirmation dialog, flea listing price, trader blacklist, keybinds
 - **Allow flea market selling** in F12 blocks both QuickSell flea sales and normal flea listings when disabled. Flea buying remains available.
 - **Refresh flea prices** in F12 updates cached flea prices; an optional hotkey can trigger the same refresh. Trader prices are calculated from the current item and its attachments.
-- **Play sell sound for each item** controls the sound when selling multiple items.
 - **2. Tooltips** — which prices to show, whether to show them in raid, tooltip delay, colour coding
 - **3. Colors** — points to the config file
+- **4. Sounds** — separate trader/flea sound toggles and once-per-batch/per-item mode
 
 Tier colours and their thresholds are in `BepInEx\plugins\QuickSell\config.json`, because each one is a list of values that the F12 menu cannot edit. That file is optional; delete it to restore defaults.
 
@@ -73,7 +73,7 @@ Built so that a raid costs effectively nothing.
 - **Keybinds check the key first.** `ItemUiContext.Update` runs every frame; the keybind test used to be the last thing in it, so every frame paid for reflection, LINQ and a `GetComponent` before discovering no key was pressed. Now it is two field reads and a return.
 - **No per-frame allocation.** The reflection cache was keyed on an interpolated string (an allocation every frame) and UI Fixes' `Count` was a reflection invoke (an array plus a boxed int per call). Both are now allocation-free.
 - **Trader assortments load lazily.** The original hooked the `Trader` constructor and force-refreshed every trader at startup, holding all of it for the session. Now nothing loads until a sale or price lookup needs it.
-- **Large-container hover does no tree pricing.** When the inventory opens, QuickSell walks the player inventory once and calculates single-item prices directly, without cloning items or recursively asking traders to price each container tree. Native add/remove/refresh events then update only the changed item and its parent containers by delta. Hover itself only reads the finished cache.
+- **Large-container hover does no tree pricing.** When the inventory opens, QuickSell walks the player inventory once and calculates single-item prices directly, without cloning items or recursively asking traders to price each container tree. Native add/remove/refresh events schedule a deferred inventory reconciliation away from hover. Hover itself only reads the finished cache.
 - **No frame-spread calculator.** There is no per-frame pricing queue or worker thread touching EFT inventory objects.
 - **Bulk selling prices each item once.** It used to find the best trader once to build the confirmation total and again to perform the sale: 30 items meant 60 full trader sweeps.
 - **Flea prices are fetched per template, not per item.** Selling 20 identical items fired 20 identical requests.
@@ -94,3 +94,12 @@ MIT, unchanged from upstream. See `LICENSE.txt`.
 ---
 
 If you'd like to support my work, you can [buy me a coffee](https://ko-fi.com/its_blackhawk) ☕
+
+## v4.3.0 update
+
+- Flea tooltips and listings use the same configured percentage, with a **25%–200%** range.
+- Ammo tooltips show the value of the full stack.
+- Partially used meds, food/drinks, repair kits and resource items scale by remaining resource.
+- Manual flea refresh swaps price tables only after the refreshed table is ready.
+- Current generated flea offers are used for market pricing, with SPT dynamic/base prices as fallback.
+- Separate trader/flea sound controls with once-per-batch or per-item modes.
