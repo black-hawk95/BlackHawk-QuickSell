@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace QuickSell
 {
-    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "4.0.1")]
+    [BepInPlugin("com.blackhawk.quicksell", "BlackHawk-QuickSell", "4.3.0")]
     // UI Fixes 6.0 (SPT 4.1) changed its GUID from "Tyfon.UIFixes" to "com.tyfon.uifixes".
     // Both are declared so load order is correct against either version.
     // Only the current GUID is declared. The legacy "Tyfon.UIFixes" was kept for a while for
@@ -26,6 +26,7 @@ namespace QuickSell
         private const string SectionSelling = "1. Selling";
         private const string SectionTooltips = "2. Tooltips";
         private const string SectionColors = "3. Colors";
+        private const string SectionSounds = "4. Sounds";
         private const string SectionDebug = "9. Debug";
 
         private static readonly Version UIFixesMinimumVersion = new(2, 5);
@@ -64,6 +65,17 @@ namespace QuickSell
 
         internal static ConfigEntry<KeyboardShortcut> KeybindTraders;
         internal static ConfigEntry<KeyboardShortcut> KeybindFlea;
+
+        // ------------------------------------------------------------------ sounds
+
+        private static ConfigEntry<bool> _traderSellSound;
+        private static ConfigEntry<bool> _fleaListingSound;
+        private static ConfigEntry<string> _soundMode;
+
+        public static bool TraderSellSound => _traderSellSound?.Value ?? true;
+        public static bool FleaListingSound => _fleaListingSound?.Value ?? true;
+        public static bool PlaySellSoundPerItem =>
+            string.Equals(_soundMode?.Value, "Per item", StringComparison.OrdinalIgnoreCase);
 
         // ------------------------------------------------------------------ tooltips
 
@@ -124,6 +136,7 @@ namespace QuickSell
             BindSellingSettings();
             BindTooltipSettings();
             BindColorInfo();
+            BindSoundSettings();
             BindDebugSettings();
 
             EnableUIFixesIntegration = UIFixesDetected;
@@ -170,9 +183,15 @@ namespace QuickSell
                     "What percentage of the average flea price to list items at.\n\n" +
                     "100 = the average price shown on the add-offer window.\n" +
                     "Below 100 undercuts the market so items sell faster.\n" +
-                    "Above 100 asks more than average.",
-                    new AcceptableValueRange<int>(50, 150),
+                    "Above 100 asks more than average. Range: 25% to 200%.",
+                    new AcceptableValueRange<int>(25, 200),
                     new ConfigurationManagerAttributes { Order = 97 }));
+
+            // The flea line in the tooltip shows the price QuickSell will actually list at, not
+            // the raw market average. Changing the percentage only affects formatting/math, so the
+            // expensive precomputed market-price cache can stay intact; just discard finished
+            // tooltip strings so the next hover reflects the new percentage immediately.
+            _avgPricePercent.SettingChanged += (_, _) => TooltipPatch.Invalidate();
 
             _ignoreFleaCapacity = Config.Bind(SectionSelling, "Ignore offer slot limit", false,
                 new ConfigDescription(
@@ -328,6 +347,26 @@ namespace QuickSell
                         HideDefaultButton = true,
                         Order = 93
                     }));
+        }
+
+        private void BindSoundSettings()
+        {
+            _traderSellSound = Config.Bind(SectionSounds, "Trader sell sound", true,
+                new ConfigDescription(
+                    "Play the trade-complete sound after QuickSell successfully sells to a trader.",
+                    null, new ConfigurationManagerAttributes { Order = 100 }));
+
+            _fleaListingSound = Config.Bind(SectionSounds, "Flea listing sound", true,
+                new ConfigDescription(
+                    "Play the trade-complete sound after QuickSell successfully lists an item on the flea market.",
+                    null, new ConfigurationManagerAttributes { Order = 99 }));
+
+            _soundMode = Config.Bind(SectionSounds, "Sound mode", "Once per batch",
+                new ConfigDescription(
+                    "Once per batch = play one sound for a multi-item QuickSell operation.\n\n" +
+                    "Per item = play the sound once for every item that sells or lists successfully.",
+                    new AcceptableValueList<string>("Once per batch", "Per item"),
+                    new ConfigurationManagerAttributes { Order = 98 }));
         }
 
         private void BindColorInfo()
