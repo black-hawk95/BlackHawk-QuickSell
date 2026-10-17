@@ -1,4 +1,4 @@
-using EFT;
+﻿using EFT;
 using EFT.UI.Ragfair;
 using System;
 using System.Collections.Generic;
@@ -25,7 +25,8 @@ namespace QuickSell.Patches
     /// </summary>
     internal static class FleaPriceCache
     {
-        private static readonly Dictionary<string, double> Prices = new();
+        private static readonly object PricesLock = new();
+        private static Dictionary<string, double> Prices = new(StringComparer.Ordinal);
         private static readonly HashSet<string> Pending = new();
 
         /// <summary>
@@ -35,7 +36,13 @@ namespace QuickSell.Patches
         private static readonly Dictionary<string, List<Action<double>>> Waiting = new();
 
         /// <summary>Number of prices currently held. Used for logging.</summary>
-        public static int Count => Prices.Count;
+        public static int Count
+        {
+            get
+            {
+                lock (PricesLock) return Prices.Count;
+            }
+        }
 
         /// <summary>
         /// Loads the bulk table fetched from the server mod. Existing entries are overwritten.
@@ -44,12 +51,16 @@ namespace QuickSell.Patches
         {
             if (prices == null) return;
 
-            foreach (var kvp in prices)
+            // Build the replacement away from readers, then swap it in as one operation. This
+            // keeps the previous complete table available for tooltips while a manual refresh is
+            // in flight and avoids exposing a half-filled dictionary to another thread.
+            var replacement = new Dictionary<string, double>(prices, StringComparer.Ordinal);
+            lock (PricesLock)
             {
-                Prices[kvp.Key] = kvp.Value;
+                Prices = replacement;
             }
 
-            Plugin.LogSource?.LogInfo($"QuickSell: loaded {prices.Count} flea prices; cache now holds {Prices.Count}.");
+            Plugin.LogSource?.LogInfo($"QuickSell: loaded {prices.Count} flea prices; cache now holds {replacement.Count}.");
             HoverPriceCache.OnFleaPricesChanged();
         }
 
@@ -61,7 +72,10 @@ namespace QuickSell.Patches
         /// </summary>
         public static bool TryGet(string templateId, out double price)
         {
-            return Prices.TryGetValue(templateId, out price);
+            lock (PricesLock)
+            {
+                return Prices.TryGetValue(templateId, out price);
+            }
         }
 
         /// <summary>
@@ -75,10 +89,14 @@ namespace QuickSell.Patches
         {
             if (ragFair == null || string.IsNullOrEmpty(templateId)) return;
 
-            if (Prices.TryGetValue(templateId, out var known))
+            double known;
+            lock (PricesLock)
             {
-                onResolved?.Invoke(known);
-                return;
+                if (Prices.TryGetValue(templateId, out known))
+                {
+                    onResolved?.Invoke(known);
+                    return;
+                }
             }
 
             // A request for this template is already in flight, most likely started by a tooltip.
@@ -109,7 +127,10 @@ namespace QuickSell.Patches
 
                     if (result != null)
                     {
-                        Prices[templateId] = result.avg;
+                        lock (PricesLock)
+                        {
+                            Prices[templateId] = result.avg;
+                        }
                         HoverPriceCache.OnFleaPricesChanged();
                     }
 
@@ -146,10 +167,13 @@ namespace QuickSell.Patches
             }
         }
 
-        /// <summary>Drops everything. Used by the manual refresh in the F12 menu.</summary>
+        /// <summary>Drops everything for a full cache reset/recovery path.</summary>
         public static void Clear()
         {
-            Prices.Clear();
+            lock (PricesLock)
+            {
+                Prices = new Dictionary<string, double>(StringComparer.Ordinal);
+            }
             HoverPriceCache.InvalidateFlea();
             Pending.Clear();
 

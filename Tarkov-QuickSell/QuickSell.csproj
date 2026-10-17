@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
@@ -6,7 +6,7 @@
     <AssemblyName>QuickSell</AssemblyName>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyVersion>4.0.1</AssemblyVersion>
+    <AssemblyVersion>4.3.0</AssemblyVersion>
     <FileVersion>$(AssemblyVersion)</FileVersion>
     <Version>$(AssemblyVersion)</Version>
     <Deterministic>true</Deterministic>
@@ -67,6 +67,12 @@
     </Reference>
     <Reference Include="CommonExtensions">
       <HintPath>$(ManagedPath)\CommonExtensions.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- EFT 4.1 moved IItemComponent into ItemComponent.Types.dll.
+         Required by GetItemComponent<T>() for meds, food/drink and resource components. -->
+    <Reference Include="ItemComponent.Types">
+      <HintPath>$(ManagedPath)\ItemComponent.Types.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">

@@ -1,4 +1,4 @@
-using EFT;
+﻿using EFT;
 using EFT.InventoryLogic;
 using EFT.Trading;
 using EFT.Utilities;
@@ -26,8 +26,8 @@ namespace QuickSell.Patches
             public Item Item;
             public readonly Dictionary<string, int> SelfTrader = new(StringComparer.Ordinal);
             public readonly Dictionary<string, int> TotalTrader = new(StringComparer.Ordinal);
-            // v4.0.1 flea semantics: a hovered root uses one template average, while a stack
-            // nested inside another item contributes average * StackObjectsCount.
+            // Flea values are totals for the actual item stack. A 59-round ammo stack must show
+            // 59 * the per-round flea value whether it is hovered directly or nested in a container.
             public double SelfFlea;
             public double SelfFleaAsChild;
             public double TotalFlea;
@@ -62,6 +62,7 @@ namespace QuickSell.Patches
         private static bool _warmComplete;
         private static bool _traderPriceDataReady;
         private static bool _fleaRebuildRequested;
+        private static bool _fleaRebuildQueued;
         private static int _warmGeneration;
         private static SynchronizationContext _mainThreadContext;
         private static readonly object ReconcileLock = new();
@@ -86,6 +87,7 @@ namespace QuickSell.Patches
             {
                 _reconcileQueued = false;
                 _reconcileReason = null;
+                _fleaRebuildQueued = false;
                 RebuildSelfIds.Clear();
             }
 
@@ -119,7 +121,10 @@ namespace QuickSell.Patches
 
                 if (_warmComplete)
                 {
-                    if (_fleaRebuildRequested && string.Equals(trigger, "inventory-open", StringComparison.Ordinal))
+                    // Any main-thread menu/inventory trigger can finish a deferred flea refresh.
+                    // Normally OnFleaPricesChanged posts the rebuild immediately, but this remains
+                    // the fallback for startup timing where no Unity SynchronizationContext existed.
+                    if (_fleaRebuildRequested)
                         RebuildFleaTotals(trigger);
                     return;
                 }
@@ -375,8 +380,9 @@ namespace QuickSell.Patches
 
             if (Plugin.ShowFleaPriceInTooltip && entry.SelfFleaComplete)
             {
-                entry.SelfFlea = flea;
-                entry.SelfFleaAsChild = flea * Math.Max(1, item.StackObjectsCount);
+                var stackTotal = FleaListingPrice.GetRawStackValue(item, flea);
+                entry.SelfFlea = stackTotal;
+                entry.SelfFleaAsChild = stackTotal;
             }
 
             if (!Plugin.ShowTraderPriceInTooltip)
@@ -575,12 +581,9 @@ namespace QuickSell.Patches
                 return false;
             }
 
-            if (_fleaRebuildRequested)
-            {
-                complete = false;
-                return false;
-            }
-
+            // A queued flea refresh leaves the previous fully-built aggregate usable until the
+            // replacement is rebuilt on Unity's main thread. InvalidateFlea() still marks entries
+            // incomplete explicitly, so a genuinely empty/invalid cache cannot leak stale values.
             complete = entry.TotalFleaIncompleteCount == 0;
             price = entry.TotalFlea;
             return price > 0;
@@ -805,14 +808,51 @@ namespace QuickSell.Patches
         }
         public static void OnFleaPricesChanged()
         {
-            // Flea callbacks may arrive from networking code. Do not touch live EFT Item objects
-            // from that callback. Mark the aggregate dirty; it is rebuilt on the next inventory
-            // screen open or native inventory mutation (both are main-thread game paths).
+            // This may run on the networking worker. Never touch live EFT Item objects here. Keep
+            // the previous aggregate active, mark it dirty, and post exactly one rebuild onto the
+            // captured Unity/main-thread context. That removes the old refresh gap where tooltips
+            // temporarily became incomplete until the inventory was opened again.
             _fleaRebuildRequested = true;
-            TooltipPatch.Invalidate();
+            QueueFleaRebuild("prices-changed");
 
             if (Plugin.DebugLogging)
                 Plugin.DebugLog("PRECOMPUTE flea-rebuild requested");
+        }
+
+        private static void QueueFleaRebuild(string reason)
+        {
+            try
+            {
+                var context = _mainThreadContext;
+                if (context == null)
+                {
+                    if (Plugin.DebugLogging)
+                        Plugin.DebugLog("PRECOMPUTE flea-rebuild deferred: no main-thread context");
+                    return;
+                }
+
+                lock (ReconcileLock)
+                {
+                    if (_fleaRebuildQueued) return;
+                    _fleaRebuildQueued = true;
+                }
+
+                context.Post(_ =>
+                {
+                    lock (ReconcileLock) _fleaRebuildQueued = false;
+
+                    // All cache/Item inspection stays on Unity's main thread. If the inventory has
+                    // not been warmed yet, the normal warm path will consume the latest table.
+                    if (_warmComplete && _fleaRebuildRequested && Entries.Count > 0)
+                        RebuildFleaTotals(reason);
+                }, null);
+            }
+            catch (Exception ex)
+            {
+                lock (ReconcileLock) _fleaRebuildQueued = false;
+                if (Plugin.DebugLogging)
+                    Plugin.DebugLog($"PRECOMPUTE flea-rebuild queue failed error={ex.Message}");
+            }
         }
 
         private static void RebuildFleaTotals(string reason)
@@ -833,8 +873,9 @@ namespace QuickSell.Patches
 
                     if (entry.SelfFleaComplete)
                     {
-                        entry.SelfFlea = flea;
-                        entry.SelfFleaAsChild = flea * Math.Max(1, entry.Item.StackObjectsCount);
+                        var stackTotal = FleaListingPrice.GetRawStackValue(entry.Item, flea);
+                        entry.SelfFlea = stackTotal;
+                        entry.SelfFleaAsChild = stackTotal;
                     }
                 }
 
@@ -857,6 +898,7 @@ namespace QuickSell.Patches
                 }
 
                 _fleaRebuildRequested = false;
+                lock (ReconcileLock) _fleaRebuildQueued = false;
                 TooltipPatch.Invalidate();
                 sw.Stop();
                 if (Plugin.DebugLogging)

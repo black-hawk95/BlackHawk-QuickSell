@@ -1,4 +1,4 @@
-using EFT.InventoryLogic;
+﻿using EFT.InventoryLogic;
 using EFT.UI;
 using HarmonyLib;
 using SPT.Reflection.Patching;
@@ -197,7 +197,10 @@ namespace QuickSell.Patches
             {
                 if (HoverPriceCache.TryGetFlea(item, out var cachedTotal, out var fleaComplete))
                 {
-                    fleaPrice = cachedTotal;
+                    // Show the amount QuickSell will actually list for. The precomputed cache keeps
+                    // raw market values so changing the F12 percentage is instant and does not need
+                    // an inventory-wide rebuild.
+                    fleaPrice = cachedTotal * Plugin.AvgPricePercent / 100.0;
                 }
 
                 if (!fleaComplete)

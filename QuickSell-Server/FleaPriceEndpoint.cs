@@ -2,7 +2,12 @@ using Microsoft.AspNetCore.Http;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
+using SPTarkov.Server.Core.Extensions;
+using SPTarkov.Server.Core.Helpers.Commerce;
+using SPTarkov.Server.Core.Helpers.Items;
 using SPTarkov.Server.Core.Models.Common;
+using SPTarkov.Server.Core.Models.Eft.Ragfair;
+using SPTarkov.Server.Core.Models.Enums;
 using SPTarkov.Server.Core.Servers.Http;
 using SPTarkov.Server.Core.Services.Ragfair;
 using System;
@@ -16,44 +21,47 @@ namespace BlackHawk.QuickSell.Server
     /// <summary>
     /// Serves the whole flea price table in one response.
     ///
-    /// The client needs prices for arbitrary items while in a raid, where it must not make network
-    /// calls. Asking for them one template at a time would be thousands of round trips, so the
-    /// entire table is handed over in a single request at startup instead.
+    /// Prices prefer the average of the AI flea offers that are actually present on the market,
+    /// rather than SPT's underlying dynamic/base price table. This makes the tooltip line up with
+    /// the listings a player sees when they search the flea market.
     ///
-    /// The result is cached here, so N Fika players connecting costs one computation rather than N.
+    /// SPT's dynamic price table remains the fallback for templates that currently have no usable
+    /// money-only offers. Weapons intentionally use the static base-weapon price, then the client
+    /// adds the prices of the installed mods. This avoids counting weapon attachments twice.
     ///
-    /// Notes on the 4.1 API, since several things moved:
-    ///  - RagfairPriceService is now in Services.Ragfair, not Services.
-    ///  - ISptLogger moved out of Core into SPTarkov.Common.Models.Logging.
-    ///  - Load order is expressed relative to OnLoadOrder.Routers. A route on a URL SPT does not
-    ///    already handle goes ABOVE it: there is nothing of SPT's to order against, and no reason
-    ///    to sit below. Overriding an existing SPT route is the case that needs Routers - 1.
+    /// The result is briefly cached so several Fika clients connecting at once share one rebuild.
+    /// A manual QuickSell refresh bypasses that cache.
     /// </summary>
     [Injectable(InjectionType = InjectionType.Singleton, TypePriority = OnLoadOrder.Routers + 1)]
     public class FleaPriceEndpoint(
         ISptLogger<FleaPriceEndpoint> logger,
-        RagfairPriceService ragfairPriceService) : IHttpListener
+        RagfairPriceService ragfairPriceService,
+        RagfairOfferService ragfairOfferService,
+        ItemHelper itemHelper,
+        PaymentHelper paymentHelper) : IHttpListener
     {
         private const string RoutePrefix = "/quicksell";
         private const string RouteGetFleaPrices = "/quicksell/getFleaPrices";
 
-        // Long by design. Prices barely move on a single-player server and the client only asks
-        // once per session anyway. The F12 refresh button covers anyone running something like
-        // LiveFleaPrices who wants to pick up changes immediately.
-        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
+        // Startup requests from multiple Fika clients can arrive together. Keep only a short cache;
+        // the F12 manual refresh explicitly bypasses it.
+        private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(1);
 
         private readonly SemaphoreSlim _lock = new(1, 1);
         private Dictionary<string, double> _cached = new();
         private DateTime _nextUpdate = DateTime.MinValue;
 
-        // 4.1 signature: no sessionId here (it was CanHandle(MongoId, HttpContext) in 4.0).
+        private struct PriceAccumulator
+        {
+            public double Sum;
+            public int Count;
+        }
+
         public bool CanHandle(HttpContext context)
         {
             return context.Request.Path.StartsWithSegments(RoutePrefix, StringComparison.OrdinalIgnoreCase);
         }
 
-        // 4.1 signature: renamed from Handle to HandleAsync and given a CancellationToken, which is
-        // sourced from HttpContext.RequestAborted and cancels if the client disconnects.
         public async Task HandleAsync(MongoId sessionId, HttpContext context, CancellationToken cancellationToken)
         {
             try
@@ -64,51 +72,157 @@ namespace BlackHawk.QuickSell.Server
                     return;
                 }
 
-                var prices = await GetPricesAsync(cancellationToken);
+                var forceRefresh = context.Request.Query.TryGetValue("force", out var forceValue)
+                    && (string.Equals(forceValue.ToString(), "1", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(forceValue.ToString(), "true", StringComparison.OrdinalIgnoreCase));
+
+                var prices = await GetPricesAsync(forceRefresh, cancellationToken);
                 await context.Response.WriteAsJsonAsync(prices, cancellationToken);
             }
             catch (OperationCanceledException)
             {
-                // The client went away. Cancellation is not an error, so let it propagate rather
-                // than logging it as a failure.
                 throw;
             }
             catch (Exception ex)
             {
-                logger.Error($"[QuickSell] Failed to serve flea prices: {ex.Message}");
+                logger.Error($"[QuickSell] Failed to serve flea prices: {ex}");
                 context.Response.StatusCode = 500;
             }
         }
 
-        private async Task<Dictionary<string, double>> GetPricesAsync(CancellationToken cancellationToken)
+        private async Task<Dictionary<string, double>> GetPricesAsync(
+            bool forceRefresh,
+            CancellationToken cancellationToken)
         {
-            if (_nextUpdate > DateTime.UtcNow && _cached.Count > 0) return _cached;
+            if (!forceRefresh && _nextUpdate > DateTime.UtcNow && _cached.Count > 0)
+                return _cached;
 
-            // SemaphoreSlim rather than lock: this path is async, and holding a monitor across an
-            // await is not safe. Several Fika clients can connect at the same moment, and without
-            // this each would rebuild the table.
             await _lock.WaitAsync(cancellationToken);
             try
             {
-                if (_nextUpdate > DateTime.UtcNow && _cached.Count > 0) return _cached;
+                if (!forceRefresh && _nextUpdate > DateTime.UtcNow && _cached.Count > 0)
+                    return _cached;
 
                 var stopwatch = Stopwatch.StartNew();
 
-                var source = ragfairPriceService.GetAllFleaPrices();
-                var result = new Dictionary<string, double>(source.Count);
+                // Fallback table. Mods such as Live Flea Prices update this SPT price source, so
+                // templates without current offers still remain compatible with those mods.
+                var fallbackPrices = ragfairPriceService.GetAllFleaPrices();
 
-                foreach (var entry in source)
+                // Build averages in ONE pass over the currently generated flea offers. This avoids
+                // asking the offer service once for every template and keeps refresh work low.
+                var offerAverages = new Dictionary<MongoId, PriceAccumulator>();
+                var offers = ragfairOfferService.GetOffers();
+                var countedOffers = 0;
+
+                foreach (var offer in offers)
                 {
-                    var price = entry.Value;
-                    if (price > 0d && !double.IsNaN(price) && !double.IsInfinity(price))
-                        result[entry.Key.ToString()] = price;
+                    if (offer == null || offer.IsTraderOffer() || offer.IsPlayerOffer())
+                        continue;
+
+                    if (offer.Items == null || offer.Items.Count == 0)
+                        continue;
+
+                    var moneyOnly = true;
+                    if (offer.Requirements != null)
+                    {
+                        foreach (OfferRequirement requirement in offer.Requirements)
+                        {
+                            if (!paymentHelper.IsMoneyTpl(requirement.TemplateId))
+                            {
+                                moneyOnly = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!moneyOnly)
+                        continue;
+
+                    var firstItem = offer.Items[0];
+                    if (firstItem == null)
+                        continue;
+
+                    var itemCount = offer.SellInOnePiece.GetValueOrDefault(false)
+                        ? firstItem.Upd?.StackObjectsCount ?? 1
+                        : 1;
+
+                    if (itemCount <= 0)
+                        continue;
+
+                    double? perItemPrice = offer.RequirementsCost / itemCount;
+                    if (!perItemPrice.HasValue || !IsValidPrice(perItemPrice.Value))
+                        continue;
+
+                    var templateId = firstItem.Template;
+                    offerAverages.TryGetValue(templateId, out var accumulator);
+                    accumulator.Sum += perItemPrice.Value;
+                    accumulator.Count++;
+                    offerAverages[templateId] = accumulator;
+                    countedOffers++;
+                }
+
+                var result = new Dictionary<string, double>(fallbackPrices.Count);
+                var liveAverageCount = 0;
+                var fallbackCount = 0;
+                var weaponStaticCount = 0;
+
+                foreach (var entry in fallbackPrices)
+                {
+                    var templateId = entry.Key;
+                    double price = 0d;
+
+                    // Show Me The Money follows the same rule: use the static weapon base price,
+                    // then let the client add each installed mod separately. Using a generated
+                    // assembled-weapon offer here would double-count its attachments.
+                    if (itemHelper.IsOfBaseclass(templateId, BaseClasses.WEAPON))
+                    {
+                        price = ragfairPriceService.GetStaticPriceForItem(templateId) ?? 0d;
+                        if (IsValidPrice(price))
+                            weaponStaticCount++;
+                    }
+                    else if (offerAverages.TryGetValue(templateId, out var average)
+                             && average.Count > 0)
+                    {
+                        price = Math.Round(average.Sum / average.Count);
+                        if (IsValidPrice(price))
+                            liveAverageCount++;
+                    }
+
+                    if (!IsValidPrice(price) && IsValidPrice(entry.Value))
+                    {
+                        price = entry.Value;
+                        fallbackCount++;
+                    }
+
+                    if (IsValidPrice(price))
+                        result[templateId.ToString()] = price;
+                }
+
+                // A custom item can theoretically have active offers before it appears in the
+                // fallback table. Keep those usable too.
+                foreach (var entry in offerAverages)
+                {
+                    var key = entry.Key.ToString();
+                    if (result.ContainsKey(key) || entry.Value.Count <= 0)
+                        continue;
+
+                    var price = Math.Round(entry.Value.Sum / entry.Value.Count);
+                    if (IsValidPrice(price))
+                    {
+                        result[key] = price;
+                        liveAverageCount++;
+                    }
                 }
 
                 _cached = result;
                 _nextUpdate = DateTime.UtcNow.Add(CacheDuration);
 
                 stopwatch.Stop();
-                logger.Info($"[QuickSell] Built flea price table: {result.Count} items in {stopwatch.ElapsedMilliseconds}ms.");
+                logger.Info(
+                    $"[QuickSell] Built flea price table: {result.Count} items from {countedOffers} live offers " +
+                    $"({liveAverageCount} live averages, {weaponStaticCount} weapon bases, {fallbackCount} fallbacks) " +
+                    $"in {stopwatch.ElapsedMilliseconds}ms.");
 
                 return _cached;
             }
@@ -116,6 +230,11 @@ namespace BlackHawk.QuickSell.Server
             {
                 _lock.Release();
             }
+        }
+
+        private static bool IsValidPrice(double price)
+        {
+            return price > 0d && !double.IsNaN(price) && !double.IsInfinity(price);
         }
     }
 }

@@ -1,4 +1,4 @@
-using Comfort.Common;
+﻿using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
 using EFT.Trading;
@@ -195,9 +195,7 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
-                        // One gate shared by every item in this batch, so the confirmation sound
-                        // plays once for the whole sale instead of once per item.
-                        var soundGate = new SellSoundGate();
+                        var soundGate = new SellSoundGate(Plugin.TraderSellSound);
 
                         if (IsMultiSelectActive())
                         {
@@ -343,7 +341,12 @@ namespace QuickSell.Patches
                 {
                     if (!FleaPriceCache.TryGet(candidate.TemplateId, out var avg)) continue;
 
-                    var price = (int)Math.Ceiling(avg / 100.0 * Plugin.AvgPricePercent);
+                    // Use the same quality-aware formula as the tooltip. Partially used meds,
+                    // food/drinks and other resource items are scaled by what remains; stackable
+                    // items such as ammo still use a per-unit listing price here.
+                    var price = FleaListingPrice.GetListingUnitPrice(candidate, avg);
+                    if (price <= 0) continue;
+
                     prices[candidate.Id] = price;
                     total += price * candidate.StackObjectsCount;
 
@@ -362,9 +365,7 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
-                        // One gate shared by every item in this batch, so the confirmation sound
-                        // plays once for the whole sale instead of once per item.
-                        var soundGate = new SellSoundGate();
+                        var soundGate = new SellSoundGate(Plugin.FleaListingSound);
 
                         if (IsMultiSelectActive())
                         {
@@ -420,19 +421,32 @@ namespace QuickSell.Patches
         // ------------------------------------------------------------------ shared
 
         /// <summary>
-        /// Shared by every sale in one QuickSell batch so the trade-complete sound plays once for
-        /// the whole operation instead of once per item. Each item's sale still gets its own
-        /// ConfirmSell/RagfairAddOffer callback (needed for correct game-state handling), but they
-        /// all report into the same gate, and only the first successful result triggers the sound.
+        /// Handles the optional QuickSell completion sound without changing the sale callback flow.
+        /// Trader and flea sounds can be enabled separately, and multi-item operations can play
+        /// either once for the whole batch or once for every successful item.
         /// </summary>
         private sealed class SellSoundGate
         {
+            private readonly bool _enabled;
+            private readonly bool _playPerItem;
             private bool _played;
+
+            public SellSoundGate(bool enabled)
+            {
+                _enabled = enabled;
+                _playPerItem = Plugin.PlaySellSoundPerItem;
+            }
 
             public void OnResult(IResult result)
             {
-                if (_played || !result.Succeed) return;
-                _played = true;
+                if (!_enabled || !result.Succeed) return;
+
+                if (!_playPerItem)
+                {
+                    if (_played) return;
+                    _played = true;
+                }
+
                 Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.TradeOperationComplete);
             }
         }
