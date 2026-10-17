@@ -10,7 +10,6 @@ namespace QuickSell.TestFixes
 {
     public static class RuntimeFixes
     {
-        private static object _playPerItemEntry;
         private static object _allowFleaSalesEntry;
         private static Func<bool> _refreshHotkeyIsDown;
         private static Assembly _quickSellAssembly;
@@ -47,16 +46,6 @@ namespace QuickSell.TestFixes
                     });
 
                 if (bind == null) return;
-
-                _playPerItemEntry = bind.MakeGenericMethod(typeof(bool)).Invoke(
-                    config,
-                    new object[]
-                    {
-                        "1. Selling",
-                        "Play sell sound for each item",
-                        false,
-                        "Off = play the trade-complete sound once for the whole batch. On = play it once for every item that sells successfully."
-                    });
 
                 try
                 {
@@ -107,7 +96,8 @@ namespace QuickSell.TestFixes
             }
             catch
             {
-                _playPerItemEntry = null;
+                _allowFleaSalesEntry = null;
+                _refreshHotkeyIsDown = null;
             }
         }
 
@@ -259,20 +249,6 @@ namespace QuickSell.TestFixes
                 return true;
             }
             catch { return false; }
-        }
-
-        public static bool PlaySellSoundPerItem()
-        {
-            try
-            {
-                if (_playPerItemEntry == null) return false;
-                var value = FindProperty(_playPerItemEntry.GetType(), "Value", true)?.GetValue(_playPerItemEntry);
-                return value is bool b && b;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         public static bool ShouldSkipTooltip()
