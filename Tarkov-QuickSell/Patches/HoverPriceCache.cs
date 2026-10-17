@@ -1,4 +1,4 @@
-using EFT;
+﻿using EFT;
 using EFT.InventoryLogic;
 using EFT.Trading;
 using EFT.Utilities;
@@ -26,8 +26,8 @@ namespace QuickSell.Patches
             public Item Item;
             public readonly Dictionary<string, int> SelfTrader = new(StringComparer.Ordinal);
             public readonly Dictionary<string, int> TotalTrader = new(StringComparer.Ordinal);
-            // v4.0.1 flea semantics: a hovered root uses one template average, while a stack
-            // nested inside another item contributes average * StackObjectsCount.
+            // Flea values are totals for the actual item stack. A 59-round ammo stack must show
+            // 59 * the per-round flea value whether it is hovered directly or nested in a container.
             public double SelfFlea;
             public double SelfFleaAsChild;
             public double TotalFlea;
