@@ -1,4 +1,4 @@
-using Comfort.Common;
+﻿using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
 using EFT.Trading;
@@ -48,8 +48,6 @@ namespace QuickSell.Patches
     /// <summary>Selling logic, shared by the context menu entries and the keybinds.</summary>
     internal static class ContextMenuPatch
     {
-        // The "unload ammo" sprite is reused for both menu entries. Fetching it per right-click was
-        // wasteful; it never changes, so it is fetched once.
         private static Sprite _menuSprite;
         private static bool _menuSpriteFetched;
 
@@ -66,8 +64,6 @@ namespace QuickSell.Patches
 
         internal static MethodBase FindMenuMethod(string name)
         {
-            // Requiring an Item parameter disambiguates the two Show overloads: only one takes an
-            // Item, the other takes an icons dictionary.
             var method = typeof(SimpleContextMenu)
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .FirstOrDefault(m =>
@@ -127,12 +123,8 @@ namespace QuickSell.Patches
                 Singleton<MenuUI>.Instance.HideoutAreaTransferItemsScreen != null &&
                 Singleton<MenuUI>.Instance.HideoutAreaTransferItemsScreen.isActiveAndEnabled) return;
 
-            // Where an item may be sold from - stash, and optionally containers you are carrying.
-            // See SellLocation.
             if (!SellLocation.IsSellable(item)) return;
 
-            // Was .Dictionary_0 in 4.0. The public DynamicInteractions property is a read-only
-            // IEnumerable, so the backing dictionary is needed in order to add entries.
             var dynamicInteractions = Compat.GetOn<Dictionary<string, DynamicContextInteraction>>(
                 typeof(ContextInteractions<EItemInfoButton>), contextInteractions, "_dynamicInteractions");
             if (dynamicInteractions is null) return;
@@ -150,8 +142,6 @@ namespace QuickSell.Patches
             }
         }
 
-        // ------------------------------------------------------------------ traders
-
         public static void SellToTraders(Item item)
         {
             try
@@ -163,15 +153,9 @@ namespace QuickSell.Patches
                     return;
                 }
 
-                // Assortments are loaded ONCE for the whole operation. The old code ran a trader
-                // health check inside the per-item loop, so a 30-item sale repeated it 30 times.
                 TraderService.EnsureAllAssortments(session);
 
                 var items = GetItemsToSell(item);
-
-                // Each item is priced ONCE and the winning trader kept. Previously SelectTrader ran
-                // here to build the total and then again inside the sell, doubling a full trader
-                // sweep per item.
                 var offers = new List<(Item Item, Trader Trader, int Price)>(items.Count);
                 var total = 0;
 
@@ -195,9 +179,7 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
-                        // One gate shared by every item in this batch, so the confirmation sound
-                        // plays once for the whole sale instead of once per item.
-                        var soundGate = new SellSoundGate();
+                        var soundGate = new SellSoundGate(Plugin.TraderSellSound);
 
                         if (IsMultiSelectActive())
                         {
@@ -223,12 +205,10 @@ namespace QuickSell.Patches
             }
         }
 
-        /// <summary>Sells one item to an already-chosen trader at an already-known price.</summary>
         private static void ExecuteTraderSale(Item item, Trader trader, int price, Action<IResult> onResult)
         {
             try
             {
-                // Was trader.ITraderInteractions in 4.0; now a private field.
                 var interactions = Compat.Get<ITradingSession>(trader, "_trading");
                 if (interactions is null)
                 {
@@ -248,8 +228,6 @@ namespace QuickSell.Patches
                 Plugin.LogSource.LogWarning(ex.ToString());
             }
         }
-
-        // ------------------------------------------------------------------ flea
 
         public static void SellToFlea(Item item)
         {
@@ -298,11 +276,7 @@ namespace QuickSell.Patches
                     return;
                 }
 
-                // Flea price is per template; one lookup covers every copy of the same template.
                 var templates = new HashSet<string>(validItems.Select(i => i.TemplateId.ToString()));
-
-                // Cache hits fire the RequestIfMissing callback synchronously, so including cached
-                // templates could double-fire the confirmation when everything is already cached.
                 var uncached = templates.Where(t => !FleaPriceCache.TryGet(t, out _)).ToList();
 
                 if (uncached.Count == 0)
@@ -343,12 +317,12 @@ namespace QuickSell.Patches
                 {
                     if (!FleaPriceCache.TryGet(candidate.TemplateId, out var avg)) continue;
 
-                    var price = (int)Math.Ceiling(avg / 100.0 * Plugin.AvgPricePercent);
+                    var price = FleaListingPrice.GetListingUnitPrice(candidate, avg);
+                    if (price <= 0) continue;
+
                     prices[candidate.Id] = price;
                     total += price * candidate.StackObjectsCount;
 
-                    // Tax stays PER ITEM even though price is per template: the fee depends on the
-                    // individual item's stack size and condition, not just its type.
                     totalFee += (int)Math.Ceiling(
                         PriceCalculator.CalculateTaxPrice(candidate, candidate.StackObjectsCount, price, false));
                 }
@@ -362,9 +336,7 @@ namespace QuickSell.Patches
                 ConfirmWindow(
                     () =>
                     {
-                        // One gate shared by every item in this batch, so the confirmation sound
-                        // plays once for the whole sale instead of once per item.
-                        var soundGate = new SellSoundGate();
+                        var soundGate = new SellSoundGate(Plugin.FleaListingSound);
 
                         if (IsMultiSelectActive())
                         {
@@ -417,22 +389,28 @@ namespace QuickSell.Patches
             }
         }
 
-        // ------------------------------------------------------------------ shared
-
-        /// <summary>
-        /// Shared by every sale in one QuickSell batch so the trade-complete sound plays once for
-        /// the whole operation instead of once per item. Each item's sale still gets its own
-        /// ConfirmSell/RagfairAddOffer callback (needed for correct game-state handling), but they
-        /// all report into the same gate, and only the first successful result triggers the sound.
-        /// </summary>
         private sealed class SellSoundGate
         {
+            private readonly bool _enabled;
+            private readonly bool _playPerItem;
             private bool _played;
+
+            public SellSoundGate(bool enabled)
+            {
+                _enabled = enabled;
+                _playPerItem = Plugin.PlaySellSoundPerItem;
+            }
 
             public void OnResult(IResult result)
             {
-                if (_played || !result.Succeed) return;
-                _played = true;
+                if (!_enabled || !result.Succeed) return;
+
+                if (!_playPerItem)
+                {
+                    if (_played) return;
+                    _played = true;
+                }
+
                 Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.TradeOperationComplete);
             }
         }
@@ -464,11 +442,16 @@ namespace QuickSell.Patches
             string message;
             if (totalPrice.HasValue && fee.HasValue && fee.Value > 0)
             {
-                message = $"{baseMsg}\n\nListing Fee: {PriceFormat.Format(fee.Value)}\nNet Profit: {PriceFormat.Format(totalPrice.Value - fee.Value)}";
+                message = $"{baseMsg}
+
+Listing Fee: {PriceFormat.Format(fee.Value)}
+Net Profit: {PriceFormat.Format(totalPrice.Value - fee.Value)}";
             }
             else if (totalPrice.HasValue)
             {
-                message = $"{baseMsg}\n\n{PriceFormat.Format(totalPrice.Value)}";
+                message = $"{baseMsg}
+
+{PriceFormat.Format(totalPrice.Value)}";
             }
             else
             {
