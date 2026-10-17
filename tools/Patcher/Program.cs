@@ -37,7 +37,6 @@ internal static class Program
 
         PatchAwake(module, ImportHelper("Initialize"));
         PatchTooltipGuard(module, ImportHelper("ShouldSkipTooltip"), ImportHelper("InvalidateTooltipIfContentsChanged"));
-        PatchSoundGate(module, ImportHelper("PlaySellSoundPerItem"));
         PatchFleaSaleToggle(module, ImportHelper("AllowFleaSales"), ImportHelper("ShouldShowFleaEntry"));
         PatchRefreshHotkey(module, ImportHelper("TryRefreshFleaPricesHotkey"));
         // Sell the assembled root as one item, but quote the components it contains.
@@ -180,26 +179,6 @@ internal static class Program
         il.InsertBefore(first, checkContents);
         method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 1);
         Console.WriteLine("Patched trader-inventory tooltip suppression and changed-item cache invalidation.");
-    }
-
-    private static void PatchSoundGate(ModuleDefinition module, MethodReference playEach)
-    {
-        var contextType = FindType(module, "QuickSell.Patches.ContextMenuPatch");
-        var gate = contextType.NestedTypes.FirstOrDefault(t => t.Name == "SellSoundGate")
-            ?? throw new InvalidOperationException("SellSoundGate not found");
-        var method = gate.Methods.Single(m => m.Name == "OnResult");
-        var played = gate.Fields.Single(f => f.Name == "_played");
-
-        var il = method.Body.GetILProcessor();
-        var first = method.Body.Instructions.First();
-
-        il.InsertBefore(first, il.Create(OpCodes.Call, playEach));
-        il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
-        il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
-        il.InsertBefore(first, il.Create(OpCodes.Ldc_I4_0));
-        il.InsertBefore(first, il.Create(OpCodes.Stfld, played));
-        method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, 2);
-        Console.WriteLine("Patched per-item sell sound toggle.");
     }
 
     private static void PatchFleaSaleToggle(ModuleDefinition module, MethodReference allowed, MethodReference showEntry)
